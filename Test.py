@@ -1,7 +1,19 @@
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtWidgets import QFileDialog, QMessageBox
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+from PyQt5.QtGui import QImage, QPixmap
+from csvRead import generate_plot
+
 
 class Ui_MainWindow(object):
+    
+    def open_file(self):
+        file_path, _ = QFileDialog.getOpenFileName(None, "Open File", "", "CSV Files (*.csv);;All Files (*)")
+        if file_path:
+            figure = generate_plot(file_path)  # Call the imported function
+            self.display_matplotlib_graph(figure)
+
     def setupUi(self, MainWindow):
         MainWindow.setObjectName("MainWindow")
         MainWindow.resize(796, 600)
@@ -160,11 +172,15 @@ class Ui_MainWindow(object):
         # Check if the file is a CSV file
         if file_path.endswith('.csv'):
             try:
-                with open(file_path, 'r') as file:
-                    content = file.read()
-                # Display CSV content in the scene
-                text_item = QtWidgets.QGraphicsTextItem(content)
-                self.scene.addItem(text_item)
+                # Read the CSV content (optional for graph generation)
+                import pandas as pd
+                data = pd.read_csv(file_path)
+                
+                # Call a function to generate the matplotlib figure
+                figure = self.generate_plot(data)
+                
+                # Render the graph on the scene
+                self.display_matplotlib_graph(figure)
                 self.is_unsaved = True
             except Exception as e:
                 QMessageBox.warning(None, "Error", f"Could not load CSV file:\n{e}")
