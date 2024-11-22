@@ -7,12 +7,6 @@ from csvRead import generate_plot
 
 
 class Ui_MainWindow(object):
-    
-    def open_file(self):
-        file_path, _ = QFileDialog.getOpenFileName(None, "Open File", "", "CSV Files (*.csv);;All Files (*)")
-        if file_path:
-            figure = generate_plot(file_path)  # Call the imported function
-            self.display_matplotlib_graph(figure)
 
     def setupUi(self, MainWindow):
         MainWindow.setObjectName("MainWindow")
@@ -96,6 +90,24 @@ class Ui_MainWindow(object):
         self.current_file_path = None
         self.is_unsaved = False  # Track unsaved changes
 
+    def display_matplotlib_graph(self, figure):
+        # Create a canvas for the figure
+        canvas = FigureCanvas(figure)
+    
+        # Create a graphics scene to display the canvas
+        scene = QtWidgets.QGraphicsScene()  # Parent should be None or MainWindow, not Ui_MainWindow.
+    
+        # Add the canvas as an item to the scene
+        scene.addWidget(canvas)
+    
+        # Set the scene for the graphics view to display the canvas
+        self.graphicsView.setScene(scene)
+    
+        # Resize the graphics view to fit the figure
+        self.graphicsView.setRenderHint(QtGui.QPainter.Antialiasing)
+        canvas.draw()
+
+
 
     def retranslateUi(self, MainWindow):
         _translate = QtCore.QCoreApplication.translate
@@ -116,7 +128,7 @@ class Ui_MainWindow(object):
         self.actionRedo.setText(_translate("MainWindow", "Redo"))
         self.actionRedo.setShortcut(_translate("MainWindow", "Ctrl+Y"))
 
-    # Helper method to handle unsaved changes
+     
     def prompt_save_changes(self):
         if self.is_unsaved:
             response = QMessageBox.question(
@@ -141,7 +153,7 @@ class Ui_MainWindow(object):
                 return False
         return True
 
-    # Slot methods
+    
     def handle_new_action(self):
         if self.prompt_save_changes():
             self.new_file()
@@ -155,6 +167,7 @@ class Ui_MainWindow(object):
         self.scene.clear()
         self.current_file_path = None
         self.is_unsaved = False
+        self.display_matplotlib_graph(Figure())
         QMessageBox.information(None, "New File", "Created a new file.")
 
     def open_file(self):
@@ -177,7 +190,7 @@ class Ui_MainWindow(object):
                 data = pd.read_csv(file_path)
                 
                 # Call a function to generate the matplotlib figure
-                figure = self.generate_plot(data)
+                figure = generate_plot(file_path)
                 
                 # Render the graph on the scene
                 self.display_matplotlib_graph(figure)

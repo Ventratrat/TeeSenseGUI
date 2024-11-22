@@ -7,25 +7,34 @@ def generate_plot(csv_file):
     y = []
 
     with open(csv_file, 'r', encoding='utf-8-sig') as csvfile: 
-        lines = csv.reader(csvfile, delimiter=',') 
-        for row in lines: 
-            x.append(float(row[0])) 
-            y.append(float(row[1])) 
+        reader = csv.reader(csvfile, delimiter=',')
+        next(reader, None) 
+        for row in reader: 
+            try:
+                x_val = float(row[0])
+                y_val = float(row[1])
+                x.append(x_val)
+                y.append(y_val)
+            except ValueError:
+                print(f"Skipping invalid row: {row}")
+
+    if len(x) == 0 or len(y) == 0:
+        raise ValueError("No valid data found in the CSV file.")
 
     x_min, x_max = min(x), max(x)
     y_min, y_max = min(y), max(y)
 
-    x_margin = (x_max - x_min) * 0.1 if x_max != x_min else 1  
-    y_margin = (y_max - y_min) * 0.1 if y_max != y_min else 1
+    x_margin = (x_max - x_min) * 0.1 
+    y_margin = (y_max - y_min) * 0.1 
 
     num_x_intervals = 10
     num_y_intervals = 20
 
-    x_step = max(1, round(x_max / num_x_intervals))
-    y_step = max(1, round(y_max / num_y_intervals))
+    x_step = x_max / num_x_intervals
+    y_step = y_max / num_y_intervals
 
     figure, ax = plt.subplots()
-    ax.plot(x, y, color='g', linestyle='dashed', marker='o', label="Test Data")
+    ax.plot(x, y, color='g', linestyle='dashed', marker='o', label="Current")
 
     ax.set_xlim(x_min - x_margin, x_max + x_margin)
     ax.set_ylim(y_min - y_margin, y_max + y_margin)
@@ -34,7 +43,7 @@ def generate_plot(csv_file):
 
     ax.set_xlabel('Input') 
     ax.set_ylabel('Output') 
-    ax.set_title('Test Data', fontsize=20) 
+    ax.set_title('Current Pulse Data', fontsize=20) 
     ax.grid() 
     ax.legend() 
 
