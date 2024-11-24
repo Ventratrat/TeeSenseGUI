@@ -1,6 +1,7 @@
 import csv
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib.ticker import FuncFormatter
 
 def generate_plot(csv_file):
     x = []
@@ -45,6 +46,16 @@ def generate_plot(csv_file):
     ax.set_ylabel('Output') 
     ax.set_title('Current Pulse Data', fontsize=20) 
     ax.grid() 
-    ax.legend() 
+    ax.legend()
+
+    def scientific_formatter(value, tick_position):
+        if value > 1000 or value < 0.01:
+            return f'{value:.1e}'
+        else:
+            return f'{value:.2f}'
+
+    # Apply the scientific formatter to both axes
+    ax.xaxis.set_major_formatter(FuncFormatter(scientific_formatter))
+    ax.yaxis.set_major_formatter(FuncFormatter(scientific_formatter))
 
     return figure
