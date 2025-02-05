@@ -1,8 +1,8 @@
 from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtWidgets import QFileDialog, QMessageBox
+from PyQt5.QtWidgets import QFileDialog, QMessageBox, QVBoxLayout, QFrame
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
-from PyQt5.QtGui import QImage, QPixmap
 from csvRead import generate_plot
 import pandas as pd
 import json
@@ -12,74 +12,61 @@ class Ui_MainWindow(object):
 
     def setupUi(self, MainWindow):
         MainWindow.setObjectName("MainWindow")
-        MainWindow.resize(796, 600)
-        
+        MainWindow.resize(900, 600)
+
         self.centralwidget = QtWidgets.QWidget(MainWindow)
         self.centralwidget.setObjectName("centralwidget")
-        
+
         self.main_layout = QtWidgets.QHBoxLayout(self.centralwidget)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.graphicsView = QtWidgets.QGraphicsView(self.centralwidget)
-        self.graphicsView.setObjectName("graphicsView")
-        
-        self.scene = QtWidgets.QGraphicsScene()
-        self.graphicsView.setScene(self.scene)
-        self.main_layout.addWidget(self.graphicsView, 2)
 
+        # Left side: Matplotlib plot container
+        self.plotFrame = QFrame(self.centralwidget)
+        self.plotLayout = QVBoxLayout(self.plotFrame)
+        self.plotLayout.setContentsMargins(0, 0, 0, 0)
+
+        # Matplotlib Figure and Canvas
+        self.figure = Figure()
+        self.canvas = FigureCanvas(self.figure)
+        self.toolbar = NavigationToolbar(self.canvas, self.plotFrame)
+
+        self.plotLayout.addWidget(self.toolbar)
+        self.plotLayout.addWidget(self.canvas)
+        self.main_layout.addWidget(self.plotFrame, 2)
+
+        # Right side: Text Display
         self.textDisplay = QtWidgets.QTextEdit(self.centralwidget)
         self.textDisplay.setObjectName("textDisplay")
         self.textDisplay.setReadOnly(True)
         self.main_layout.addWidget(self.textDisplay, 1)
 
         MainWindow.setCentralWidget(self.centralwidget)
-        
-        self.menubar = QtWidgets.QMenuBar(MainWindow)
-        self.menubar.setGeometry(QtCore.QRect(0, 0, 796, 21))
-        self.menubar.setObjectName("menubar")
-        self.menuFile = QtWidgets.QMenu(self.menubar)
-        self.menuFile.setObjectName("menuFile")
-        self.menuEdit = QtWidgets.QMenu(self.menubar)
-        self.menuEdit.setObjectName("menuEdit")
-        MainWindow.setMenuBar(self.menubar)
-        
-        self.statusbar = QtWidgets.QStatusBar(MainWindow)
-        self.statusbar.setObjectName("statusbar")
-        MainWindow.setStatusBar(self.statusbar)
-        
-        self.actionNew = QtWidgets.QAction(MainWindow)
-        self.actionNew.setObjectName("actionNew")
-        self.actionOpen = QtWidgets.QAction(MainWindow)
-        self.actionOpen.setObjectName("actionOpen")
-        self.actionSave_As = QtWidgets.QAction(MainWindow)
-        self.actionSave_As.setObjectName("actionSave_As")
-        self.actionSave = QtWidgets.QAction(MainWindow)
-        self.actionSave.setObjectName("actionSave")
-        self.actionOpen_Recent = QtWidgets.QAction(MainWindow)
-        self.actionOpen_Recent.setObjectName("actionOpen_Recent")
-        self.actionUndo = QtWidgets.QAction(MainWindow)
-        self.actionUndo.setObjectName("actionUndo")
-        self.actionRedo = QtWidgets.QAction(MainWindow)
-        self.actionRedo.setObjectName("actionRedo")
-        self.actionExport = QtWidgets.QAction(MainWindow)
-        self.actionExport.setObjectName("actionExport")
 
-        self.menuFile.addAction(self.actionNew)
+        # Menu Bar
+        self.menubar = QtWidgets.QMenuBar(MainWindow)
+        self.menubar.setGeometry(QtCore.QRect(0, 0, 900, 21))
+        self.menuFile = QtWidgets.QMenu(self.menubar)
+        self.menuEdit = QtWidgets.QMenu(self.menubar)
+        MainWindow.setMenuBar(self.menubar)
+
+        # Status Bar
+        self.statusbar = QtWidgets.QStatusBar(MainWindow)
+        MainWindow.setStatusBar(self.statusbar)
+
+        # Actions
+        self.actionOpen = QtWidgets.QAction(MainWindow, text="Open")
+        self.actionSave = QtWidgets.QAction(MainWindow, text="Save")
+        self.actionExport = QtWidgets.QAction(MainWindow, text="Export")
+
         self.menuFile.addAction(self.actionOpen)
-        self.menuFile.addAction(self.actionOpen_Recent)
-        self.menuFile.addSeparator()
-        self.menuFile.addAction(self.actionSave_As)
         self.menuFile.addAction(self.actionSave)
         self.menuFile.addAction(self.actionExport)
-        self.menuEdit.addAction(self.actionUndo)
-        self.menuEdit.addAction(self.actionRedo)
         self.menubar.addAction(self.menuFile.menuAction())
-        self.menubar.addAction(self.menuEdit.menuAction())
 
         self.retranslateUi(MainWindow)
         QtCore.QMetaObject.connectSlotsByName(MainWindow)
 
-        self.actionNew.triggered.connect(self.handle_new_action)
+        # Connect Actions
         self.actionOpen.triggered.connect(self.handle_open_action)
         self.actionSave.triggered.connect(self.save_file)
         self.actionExport.triggered.connect(self.export_workspace)
@@ -88,14 +75,26 @@ class Ui_MainWindow(object):
         self.is_unsaved = False
 
     def display_matplotlib_graph(self, figure):
-        canvas = FigureCanvas(figure)
-        scene = QtWidgets.QGraphicsScene()
-        scene.addWidget(canvas)
-        self.graphicsView.setScene(scene)
-        self.graphicsView.setRenderHint(QtGui.QPainter.Antialiasing)
-        canvas.draw()
+        """Embeds a Matplotlib figure into the PyQt5 GUI."""
+        self.figure.clear()
+        new_ax = self.figure.add_subplot(111)
+        new_ax.set_title("Current Pulse Data")
         
+        for ax in figure.axes:
+            for line in ax.lines:
+                new_ax.plot(line.get_xdata(), line.get_ydata(), label=line.get_label(), linestyle='dashed', marker='o')
+
+            new_ax.set_xlim(ax.get_xlim())
+            new_ax.set_ylim(ax.get_ylim())
+            new_ax.set_xticks(ax.get_xticks())
+            new_ax.set_yticks(ax.get_yticks())
+            new_ax.grid()
+
+        self.figure.legend()
+        self.canvas.draw()
+
     def open_excel_file(self, file_path):
+        """Loads a CSV file and plots the data."""
         if file_path.endswith('.csv'):
             try:
                 data = pd.read_csv(file_path)
@@ -106,8 +105,9 @@ class Ui_MainWindow(object):
                 QMessageBox.warning(None, "Error", f"Could not load CSV file:\n{e}")
         else:
             QMessageBox.information(None, "File Opened", f"Opened: {file_path}")
-            
+
     def open_json_file(self, file_path):
+        """Loads a JSON workspace file."""
         try:
             with open(file_path, "r") as json_file:
                 workspace_data = json.load(json_file)
@@ -115,7 +115,7 @@ class Ui_MainWindow(object):
             image_file = workspace_data.get("graph_image_path")
             if image_file and os.path.exists(image_file):
                 pixmap = QPixmap(image_file)
-                self.scene.addPixmap(pixmap)
+                self.canvas.setPixmap(pixmap)
             else:
                 QMessageBox.warning(None, "Error", f"Graph image not found: {image_file}")
 
@@ -125,12 +125,12 @@ class Ui_MainWindow(object):
 
         except Exception as e:
             QMessageBox.warning(None, "Error", f"Could not load workspace:\n{e}")
-            
+
     def save_workspace(self, file_path):
+        """Saves the workspace as a JSON file."""
         workspace_data = {
             "current_file_path": self.current_file_path,
             "is_unsaved": self.is_unsaved,
-            "scene_items": self.get_scene_items(),
             "text_display": self.textDisplay.toPlainText(),
         }
 
@@ -141,129 +141,42 @@ class Ui_MainWindow(object):
         except Exception as e:
             QMessageBox.warning(None, "Save Failed", f"Could not save workspace:\n{e}")
 
-    def get_scene_items(self):
-        items_data = []
-        for item in self.scene.items():
-            if isinstance(item, QtWidgets.QGraphicsItem):
-                items_data.append({
-                    "type": type(item).__name__,
-                    "position": {"x": item.pos().x(), "y": item.pos().y()},
-                })
-        return items_data
-
     def retranslateUi(self, MainWindow):
+        """Sets the text for the UI components."""
         _translate = QtCore.QCoreApplication.translate
         MainWindow.setWindowTitle(_translate("MainWindow", "TeeSense Current Pulse Display"))
         self.menuFile.setTitle(_translate("MainWindow", "&File"))
         self.menuEdit.setTitle(_translate("MainWindow", "&Edit"))
-        self.actionNew.setText(_translate("MainWindow", "New"))
-        self.actionNew.setShortcut(_translate("MainWindow", "Ctrl+N"))
-        self.actionOpen.setText(_translate("MainWindow", "Open"))
         self.actionOpen.setShortcut(_translate("MainWindow", "Ctrl+O"))
-        self.actionSave_As.setText(_translate("MainWindow", "Save As"))
-        self.actionSave_As.setShortcut(_translate("MainWindow", "Ctrl+Shift+S"))
-        self.actionSave.setText(_translate("MainWindow", "Save"))
         self.actionSave.setShortcut(_translate("MainWindow", "Ctrl+S"))
-        self.actionOpen_Recent.setText(_translate("MainWindow", "Open Recent"))
-        self.actionUndo.setText(_translate("MainWindow", "Undo"))
-        self.actionUndo.setShortcut(_translate("MainWindow", "Ctrl+Z"))
-        self.actionRedo.setText(_translate("MainWindow", "Redo"))
-        self.actionRedo.setShortcut(_translate("MainWindow", "Ctrl+Y"))
         self.actionExport.setText(_translate("MainWindow", "Export"))
 
-    def prompt_save_changes(self):
-        if self.is_unsaved:
-            response = QMessageBox.question(
-                None, 
-                "Unsaved Changes",
-                "You have unsaved changes. Do you want to save them?",
-                QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
-                QMessageBox.Save
-            )
-            if response == QMessageBox.Save:
-                file_path, _ = QFileDialog.getSaveFileName(None, "Save As", "", "JSON Files (*.json);;All Files (*)")
-                if file_path:
-                    if not file_path.endswith('.json'):
-                        file_path += '.json'
-                    self.current_file_path = file_path
-                    self.save_workspace(file_path)
-                    return True
-            elif response == QMessageBox.Discard:
-                self.scene.clear()
-                self.current_file_path = None
-                self.is_unsaved = False
-                return True
-            else:
-                return False
-        return True
-
-    def handle_new_action(self):
-        if self.prompt_save_changes():
-            self.new_file()
-
     def handle_open_action(self):
-        if self.prompt_save_changes():
-            self.open_file()
-
-    def new_file(self):
-        self.scene.clear()
-        self.current_file_path = None
-        self.is_unsaved = False
-        self.display_matplotlib_graph(Figure())
-        QMessageBox.information(None, "New File", "Created a new file.")
-
-    def open_file(self):
-        file_path, _ = QFileDialog.getOpenFileName(
-            None,
-            "Open File",
-            "",
-            "Supported Files (*.json *.csv *.xlsx);;All Files (*)"
-        )
+        """Handles opening a new file."""
+        file_path, _ = QFileDialog.getOpenFileName(None, "Open File", "", "CSV Files (*.csv);;JSON Files (*.json)")
         if file_path:
             self.current_file_path = file_path
-            self.scene.clear()
 
             if file_path.endswith('.json'):
                 self.open_json_file(file_path)
-            elif file_path.endswith('.csv') or file_path.endswith('.xlsx'):
+            elif file_path.endswith('.csv'):
                 self.open_excel_file(file_path)
             else:
                 QMessageBox.warning(None, "Error", "Unsupported file type.")
 
     def save_file(self):
+        """Saves the current workspace."""
         if self.current_file_path:
-            pixmap = QtGui.QPixmap(self.graphicsView.viewport().size())
-            painter = QtGui.QPainter(pixmap)
-            self.scene.render(painter)
-            painter.end()
-            pixmap.save(self.current_file_path)
-            self.is_unsaved = False
-            QMessageBox.information(None, "Save File", "File saved successfully.")
+            self.save_workspace(self.current_file_path)
         else:
             self.save_as_file()
 
     def save_as_file(self):
-        file_path, _ = QFileDialog.getSaveFileName(None, "Save Workspace As", "", "JSON Files (*.json);;All Files (*)")
+        """Saves the workspace as a new file."""
+        file_path, _ = QFileDialog.getSaveFileName(None, "Save Workspace As", "", "JSON Files (*.json)")
         if file_path:
-            if not file_path.endswith('.json'):
-                file_path += '.json'
             self.current_file_path = file_path
             self.save_workspace(file_path)
-
-    def export_workspace(self):
-        file_path, _ = QFileDialog.getSaveFileName(None, "Export", "", "PNG Files (*.png);;All Files (*)")
-        if file_path:
-            # Create a QPixmap with the size of the QGraphicsView
-            pixmap = QPixmap(self.graphicsView.viewport().size())
-            
-            # Use a QPainter to render the scene onto the pixmap
-            painter = QtGui.QPainter(pixmap)
-            self.graphicsView.render(painter)
-            painter.end()
-            
-            # Save the pixmap to the selected file
-            pixmap.save(file_path)
-            QMessageBox.information(None, "Export Successful", "Workspace exported as PNG.")
 
 
 if __name__ == "__main__":
