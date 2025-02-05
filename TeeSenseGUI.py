@@ -69,7 +69,6 @@ class Ui_MainWindow(object):
         # Connect Actions
         self.actionOpen.triggered.connect(self.handle_open_action)
         self.actionSave.triggered.connect(self.save_file)
-        self.actionExport.triggered.connect(self.export_workspace)
 
         self.current_file_path = None
         self.is_unsaved = False
