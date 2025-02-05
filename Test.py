@@ -106,25 +106,6 @@ class Ui_MainWindow(object):
         else:
             QMessageBox.information(None, "File Opened", f"Opened: {file_path}")
 
-    def open_json_file(self, file_path):
-        """Loads a JSON workspace file."""
-        try:
-            with open(file_path, "r") as json_file:
-                workspace_data = json.load(json_file)
-
-            image_file = workspace_data.get("graph_image_path")
-            if image_file and os.path.exists(image_file):
-                pixmap = QPixmap(image_file)
-                self.canvas.setPixmap(pixmap)
-            else:
-                QMessageBox.warning(None, "Error", f"Graph image not found: {image_file}")
-
-            self.textDisplay.setPlainText(workspace_data.get("text_content", ""))
-            self.is_unsaved = False
-            QMessageBox.information(None, "File Opened", f"Workspace opened: {file_path}")
-
-        except Exception as e:
-            QMessageBox.warning(None, "Error", f"Could not load workspace:\n{e}")
 
     def save_workspace(self, file_path):
         """Saves the workspace as a JSON file."""
