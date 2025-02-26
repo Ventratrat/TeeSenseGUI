@@ -102,6 +102,11 @@ class Ui_MainWindow(object):
                 self.is_unsaved = True
             except Exception as e:
                 QMessageBox.warning(None, "Error", f"Could not load CSV file:\n{e}")
+        elif file_path.endswith(('.xls', '.xlsx', '.xlsm')):
+                data = pd.read_excel(file_path)
+                figure = generate_plot(file_path)
+                self.display_matplotlib_graph(figure)
+                self.is_unsaved = True
         else:
             QMessageBox.information(None, "File Opened", f"Opened: {file_path}")
 
@@ -140,6 +145,8 @@ class Ui_MainWindow(object):
                 self.open_json_file(file_path)
             elif file_path.endswith('.csv'):
                 self.open_excel_file(file_path)
+            elif file_path.endswith(('.xls', '.xlsx', '.xlsm')):
+                self.data = pd.read_excel(file_path)
             else:
                 QMessageBox.warning(None, "Error", "Unsupported file type.")
 
