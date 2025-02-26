@@ -38,9 +38,9 @@ def generate_plot(csv_file):
     ax.plot(x, y, color='g', linestyle='dashed', marker='o', label="Current")
 
     ax.set_xlim(x_min - x_margin, x_max + x_margin)
-    ax.set_ylim(y_min - y_margin, y_max + y_margin)
+    ax.set_ylim(0-(y_max + y_margin), y_max + y_margin)
     ax.set_xticks(np.arange(0, x_max + x_margin, step=x_step))
-    ax.set_yticks(np.arange(0, y_max + y_margin, step=y_step))
+    ax.set_yticks(np.arange(0-(y_max + y_margin), y_max + y_margin, step=y_step))
 
     ax.set_xlabel('Input') 
     ax.set_ylabel('Output') 
