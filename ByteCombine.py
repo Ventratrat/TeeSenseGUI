@@ -4,60 +4,53 @@ import tkinter as tk
 from tkinter import filedialog
 import csv
 
-def read_excel_and_combine_bytes(file_path):
+def read_excel_and_process(file_path):
     # Load the Excel workbook
     wb = openpyxl.load_workbook(file_path, data_only=True)
     sheet = wb.active  # Get the first sheet
     
-    byte_list = []
+    processed_data = []
+    
     for row in sheet.iter_rows(values_only=True):
-        for cell in row:
-            if isinstance(cell, int):  # Assuming integer byte values (0-255)
-                byte_list.append(cell & 0xFF)  # Ensure it's a single byte
+        if row and isinstance(row[0], str):  # Ensure there's data in the row
+            bytes_str = row[0].split()
+            bytes_str = [b.strip() for b in bytes_str if b.strip().isdigit()]  # Clean and filter valid numbers
+            
+            if len(bytes_str) == 4:
+                adc1 = (int(bytes_str[0]) << 8) | int(bytes_str[1])  # Combine first two bytes
+                adc2 = (int(bytes_str[2]) << 8) | int(bytes_str[3])  # Combine second two bytes
+                avg = (adc1 + adc2) / 2.0
+                processed_data.append([adc1, adc2, avg])
     
     wb.close()
-    
-    # Combine bytes into 2-byte values
-    combined_values = []
-    for i in range(0, len(byte_list) - 1, 2):
-        combined_value = (byte_list[i] << 8) | byte_list[i + 1]  # Combine two bytes
-        combined_values.append(combined_value)
-    
-    return combined_values
+    return processed_data
 
-def select_file():
-    root = tk.Tk()
-    root.withdraw()  # Hide the root window
-    file_path = filedialog.askopenfilename(title="Select an Excel file", filetypes=[("Excel files", "*.xlsx")])
-    return file_path
-
-def save_to_csv(data):
+def save_files(data):
     root = tk.Tk()
     root.withdraw()
-    save_path = filedialog.asksaveasfilename(title="Save Combined Bytes", defaultextension=".csv", filetypes=[("CSV files", "*.csv"), ("All files", "*.*")])
-    if save_path:
-        with open(save_path, "w", newline="") as f:
-            writer = csv.writer(f)
-            writer.writerow(["Combined Bytes"])  # Header
-            for value in data:
-                writer.writerow([value])
+    save_path = filedialog.asksaveasfilename(
+        title="Save Processed Data",
+        defaultextension=".xlsx",
+        filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")]
+    )
 
-def save_to_excel(data):
-    root = tk.Tk()
-    root.withdraw()
-    save_path = filedialog.asksaveasfilename(title="Save Combined Bytes", defaultextension=".xlsx", filetypes=[("Excel files", "*.xlsx"), ("All files", "*.*")])
     if save_path:
-        wb = openpyxl.Workbook()
-        sheet = wb.active
-        sheet.title = "Combined Bytes"
-        sheet.append(["Combined Bytes"])  # Header
-        for value in data:
-            sheet.append([value])
-        wb.save(save_path)
+
+        # Save as CSV
+        csv_path = save_path.rsplit(".", 1)[0] + ".csv"  # Ensure correct CSV extension
+        try:
+            with open(csv_path, "w", newline="") as f:
+                writer = csv.writer(f)
+                writer.writerow(["ADC1", "ADC2", "Average"])  # Header
+                for row in data:
+                    writer.writerow(row)
+            print(f"CSV file saved as: {csv_path}")
+        except Exception as e:
+            print(f"Error saving CSV file: {e}")
+
 
 # Example usage:
-file_path = select_file()
+file_path = filedialog.askopenfilename(title="Select an Excel file", filetypes=[("Excel files", "*.xlsx")])
 if file_path:
-    combined_data = read_excel_and_combine_bytes(file_path)
-    save_to_csv(combined_data)  # Save as CSV
-    save_to_excel(combined_data)  # Save as Excel
+    processed_data = read_excel_and_process(file_path)
+    save_files(processed_data)
