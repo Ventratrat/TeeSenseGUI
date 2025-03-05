@@ -2,6 +2,7 @@ import csv
 import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.ticker import FuncFormatter
+from PyQt5 import QtWidgets
 
 def generate_plot(csv_file):
     x = []
@@ -59,3 +60,53 @@ def generate_plot(csv_file):
     ax.yaxis.set_major_formatter(FuncFormatter(scientific_formatter))
 
     return figure
+
+def calculate_parameters(data):
+    """Calculates key electrical parameters from a numerical signal dataset."""
+    if data.empty:
+        return None
+
+    # Extract the second numerical column (index 1)
+    numeric_cols = data.select_dtypes(include=['number'])
+    if numeric_cols.shape[1] < 2:  # Check if there is at least two numerical columns
+        return None
+
+    column_data = numeric_cols.iloc[:, 1]  # Use the second numerical column (index 1)
+
+    # Compute required parameters
+    average_max_current = column_data.rolling(window=5).max().mean()  # Example smoothing for max current
+    average_min_current = column_data.rolling(window=5).min().mean()  # Example smoothing for min current
+    overshoot = column_data.max() - average_max_current
+    pulse_width = (column_data > (average_max_current * 0.9)).sum()  # Counts samples above 90% max
+    current_rms = np.sqrt(np.mean(column_data**2))
+    settling_time = (column_data > (average_max_current * 0.98)).sum()  # Time until within 98% of max
+
+    return {
+        "Average Maximum Current": average_max_current,
+        "Average Minimum Current": average_min_current,
+        "Overshoot": overshoot,
+        "Pulse Width": pulse_width,
+        "Current RMS": current_rms,
+        "Settling Time": settling_time
+    }
+
+
+def populate_table(tableWidget, data):
+    """Populates a QTableWidget with predefined current parameters."""
+    stats = calculate_parameters(data)
+    if not stats:
+        QtWidgets.QMessageBox.warning(None, "Error", "No numerical data found in the file.")
+        return
+
+    # Set up table structure
+    tableWidget.setRowCount(len(stats))
+    tableWidget.setColumnCount(2)
+    tableWidget.setHorizontalHeaderLabels(["Parameter", "Value"])
+
+    # Populate table
+    for row, (param, value) in enumerate(stats.items()):
+        tableWidget.setItem(row, 0, QtWidgets.QTableWidgetItem(param))  # Parameter name
+        tableWidget.setItem(row, 1, QtWidgets.QTableWidgetItem(f"{value:.4f}"))  # Value formatted
+
+    # Make first column non-editable
+    tableWidget.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)

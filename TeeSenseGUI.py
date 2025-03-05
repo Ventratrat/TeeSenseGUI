@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import QFileDialog, QMessageBox, QVBoxLayout, QFrame
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
-from csvRead import generate_plot
+from csvRead import generate_plot, populate_table
 import pandas as pd
 import json
 import os
@@ -34,11 +34,13 @@ class Ui_MainWindow(object):
         self.plotLayout.addWidget(self.canvas)
         self.main_layout.addWidget(self.plotFrame, 2)
 
-        # Right side: Text Display
-        self.textDisplay = QtWidgets.QTextEdit(self.centralwidget)
-        self.textDisplay.setObjectName("textDisplay")
-        self.textDisplay.setReadOnly(True)
-        self.main_layout.addWidget(self.textDisplay, 1)
+        self.tableWidget = QtWidgets.QTableWidget(self.centralwidget)
+        self.tableWidget.setObjectName("tableWidget")
+        self.tableWidget.setColumnCount(2)
+        self.tableWidget.setHorizontalHeaderLabels(["Parameter", "Analysis"])
+        self.tableWidget.horizontalHeader().setStretchLastSection(True)
+
+        self.main_layout.addWidget(self.tableWidget, 1)
 
         MainWindow.setCentralWidget(self.centralwidget)
 
@@ -97,6 +99,7 @@ class Ui_MainWindow(object):
         if file_path.endswith('.csv'):
             try:
                 data = pd.read_csv(file_path)
+                populate_table(self.tableWidget, data)  
                 figure = generate_plot(file_path)
                 self.display_matplotlib_graph(figure)
                 self.is_unsaved = True
@@ -104,6 +107,7 @@ class Ui_MainWindow(object):
                 QMessageBox.warning(None, "Error", f"Could not load CSV file:\n{e}")
         elif file_path.endswith(('.xls', '.xlsx', '.xlsm')):
                 data = pd.read_excel(file_path)
+                populate_table(self.tableWidget, data)  
                 figure = generate_plot(file_path)
                 self.display_matplotlib_graph(figure)
                 self.is_unsaved = True
