@@ -29,7 +29,7 @@ def generate_plot(csv_file):
     x_margin = (x_max - x_min) * 0.1 
     y_margin = (y_max - y_min) * 0.1 
 
-    num_x_intervals = 10
+    num_x_intervals = 20
     num_y_intervals = 20
 
     x_step = x_max / num_x_intervals
@@ -39,9 +39,9 @@ def generate_plot(csv_file):
     ax.plot(x, y, color='g', linestyle='dashed', marker='o', label="Current")
 
     ax.set_xlim(x_min - x_margin, x_max + x_margin)
-    ax.set_ylim(0-(y_max + y_margin), y_max + y_margin)
+    ax.set_ylim(0, y_max + y_margin)
     ax.set_xticks(np.arange(0, x_max + x_margin, step=x_step))
-    ax.set_yticks(np.arange(0-(y_max + y_margin), y_max + y_margin, step=y_step))
+    ax.set_yticks(np.arange(0, y_max + y_margin, step=y_step))
 
     ax.set_xlabel('Input') 
     ax.set_ylabel('Output') 
@@ -72,6 +72,7 @@ def calculate_parameters(data):
         return None
 
     column_data = numeric_cols.iloc[:, 1]  # Use the second numerical column (index 1)
+    
 
     # Compute required parameters
     average_max_current = column_data.rolling(window=5).max().mean()  # Example smoothing for max current
