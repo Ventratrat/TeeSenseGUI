@@ -28,12 +28,11 @@ def generate_plot(csv_file):
 
     x_margin = (x_max - x_min) * 0.1 
     y_margin = (y_max - y_min) * 0.1 
+    x_range = x_max - x_min
+    y_range = y_max - y_min
 
-    num_x_intervals = 20
-    num_y_intervals = 20
-
-    x_step = x_max / num_x_intervals
-    y_step = y_max / num_y_intervals
+    x_step = 10 ** np.floor(np.log10(x_range / 10))  
+    y_step = 10 ** np.floor(np.log10(y_range / 10))
 
     figure, ax = plt.subplots()
     ax.plot(x, y, color='g', linestyle='dashed', marker='o', label="Current")
@@ -55,7 +54,6 @@ def generate_plot(csv_file):
         else:
             return f'{value:.2f}'
 
-    # Apply the scientific formatter to both axes
     ax.xaxis.set_major_formatter(FuncFormatter(scientific_formatter))
     ax.yaxis.set_major_formatter(FuncFormatter(scientific_formatter))
 
@@ -66,21 +64,19 @@ def calculate_parameters(data):
     if data.empty:
         return None
 
-    # Extract the second numerical column (index 1)
     numeric_cols = data.select_dtypes(include=['number'])
-    if numeric_cols.shape[1] < 2:  # Check if there is at least two numerical columns
+    if numeric_cols.shape[1] < 2: 
         return None
 
-    column_data = numeric_cols.iloc[:, 1]  # Use the second numerical column (index 1)
+    column_data = numeric_cols.iloc[:, 1]  
     
 
-    # Compute required parameters
-    average_max_current = column_data.rolling(window=5).max().mean()  # Example smoothing for max current
-    average_min_current = column_data.rolling(window=5).min().mean()  # Example smoothing for min current
+    average_max_current = column_data.rolling(window=5).max().mean()  
+    average_min_current = column_data.rolling(window=5).min().mean()  
     overshoot = column_data.max() - average_max_current
-    pulse_width = (column_data > (average_max_current * 0.9)).sum()  # Counts samples above 90% max
+    pulse_width = (column_data > (average_max_current * 0.9)).sum() 
     current_rms = np.sqrt(np.mean(column_data**2))
-    settling_time = (column_data > (average_max_current * 0.98)).sum()  # Time until within 98% of max
+    settling_time = (column_data > (average_max_current * 0.98)).sum() 
 
     return {
         "Average Maximum Current": average_max_current,
@@ -99,15 +95,12 @@ def populate_table(tableWidget, data):
         QtWidgets.QMessageBox.warning(None, "Error", "No numerical data found in the file.")
         return
 
-    # Set up table structure
     tableWidget.setRowCount(len(stats))
     tableWidget.setColumnCount(2)
     tableWidget.setHorizontalHeaderLabels(["Parameter", "Value"])
 
-    # Populate table
     for row, (param, value) in enumerate(stats.items()):
-        tableWidget.setItem(row, 0, QtWidgets.QTableWidgetItem(param))  # Parameter name
-        tableWidget.setItem(row, 1, QtWidgets.QTableWidgetItem(f"{value:.4f}"))  # Value formatted
+        tableWidget.setItem(row, 0, QtWidgets.QTableWidgetItem(param))  
+        tableWidget.setItem(row, 1, QtWidgets.QTableWidgetItem(f"{value:.4f}"))  
 
-    # Make first column non-editable
     tableWidget.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
