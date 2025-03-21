@@ -71,8 +71,17 @@ def calculate_parameters(data):
     column_data = numeric_cols.iloc[:, 1]  
     
 
-    average_max_current = column_data.rolling(window=5).max().mean()  
-    average_min_current = column_data.rolling(window=5).min().mean()  
+    threshold = 0.8 * column_data.max()
+    values_within_20_percent = column_data[column_data >= threshold]
+
+    average_max_current = values_within_20_percent.mean() 
+
+    indices_to_exclude = values_within_20_percent.index
+
+    #Filter out data points from max current
+    filtered_data_for_min = column_data.drop(indices_to_exclude)
+    average_min_current = filtered_data_for_min.rolling(window=5).min().mean() 
+
     overshoot = column_data.max() - average_max_current
     pulse_width = (column_data > (average_max_current * 0.9)).sum() 
     current_rms = np.sqrt(np.mean(column_data**2))
