@@ -167,5 +167,12 @@ if __name__ == "__main__":
     MainWindow = QtWidgets.QMainWindow()
     ui = Ui_MainWindow()
     ui.setupUi(MainWindow)
+
+    # Check if a file path is provided as an argument
+    if len(sys.argv) > 1:
+        file_path = sys.argv[1]
+        if os.path.exists(file_path) and file_path.endswith('.csv'):
+            ui.open_excel_file(file_path)
+
     MainWindow.show()
     sys.exit(app.exec_())
