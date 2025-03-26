@@ -34,13 +34,15 @@ def generate_plot(csv_file):
     x_step = 10 ** np.floor(np.log10(x_range / 10))  
     y_step = 10 ** np.floor(np.log10(y_range / 10))
 
+    y_min_adjusted = y_min - y_step if y_min - y_step > 0 else 0
+    y_max_adjusted = y_max + y_step
     figure, ax = plt.subplots()
     ax.plot(x, y, color='g', linestyle='dashed', marker='o', label="Current")
 
     ax.set_xlim(x_min - x_margin, x_max + x_margin)
-    ax.set_ylim(0, y_max + y_margin)
+    ax.set_ylim(y_min_adjusted, y_max_adjusted) 
     ax.set_xticks(np.arange(0, x_max + x_margin, step=x_step))
-    ax.set_yticks(np.arange(0, y_max + y_margin, step=y_step))
+    ax.set_yticks(np.arange(y_min_adjusted, y_max_adjusted, step=y_step))
 
     ax.set_xlabel('Input') 
     ax.set_ylabel('Output') 
@@ -59,6 +61,7 @@ def generate_plot(csv_file):
 
     return figure
 
+
 def calculate_parameters(data):
     """Calculates key electrical parameters from a numerical signal dataset."""
     if data.empty:
@@ -70,13 +73,13 @@ def calculate_parameters(data):
 
     column_data = numeric_cols.iloc[:, 1]  
     
-
+    max = column_data.max()
     threshold = 0.8 * column_data.max()
-    values_within_20_percent = column_data[column_data >= threshold]
+    data_for_max = column_data[column_data >= threshold]
+    
+    average_max_current = data_for_max.mean() 
 
-    average_max_current = values_within_20_percent.mean() 
-
-    indices_to_exclude = values_within_20_percent.index
+    indices_to_exclude = data_for_max.index
 
     #Filter out data points from max current
     filtered_data_for_min = column_data.drop(indices_to_exclude)
