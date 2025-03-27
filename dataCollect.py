@@ -6,6 +6,7 @@ import threading
 import csv
 from datetime import datetime
 import subprocess
+from ByteCombine import process_unfiltered_data, process_filtered_data
 
 
 # Serial reading code
@@ -67,6 +68,7 @@ def read_from_serial():
     global data
     data = []
     byte_buffer = []
+    start_time = time.time()
 
     try:
         while not stop_thread:
@@ -76,10 +78,10 @@ def read_from_serial():
                     byte_buffer.append(byte)
 
                 if len(byte_buffer) == 4:
-                    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    elapsed_time_ms = int((time.time() - start_time) * 1000)  # Time in milliseconds
                     byte_values = [int.from_bytes(b, byteorder='big') for b in byte_buffer]
-                    data.append([timestamp] + byte_values)
-                    print(f"Received: {byte_values} (Timestamp: {timestamp})")
+                    data.append([elapsed_time_ms] + byte_values)
+                    print(f"Received: {byte_values} (Elapsed Time: {elapsed_time_ms} ms)")
                     byte_buffer = [] 
                     
                 if len(data) >= 200:
@@ -102,7 +104,7 @@ def write_data_to_csv(data, filename):
             writer = csv.writer(file)
             # Write header if the file is empty
             if file.tell() == 0:
-                writer.writerow(["Timestamp", "Byte1", "Byte2", "Byte3", "Byte4"])
+                writer.writerow(["Time", "Byte1", "Byte2", "Byte3", "Byte4"])
             writer.writerows(data)
             print(f"Written {len(data)} rows to {filename}.")
     except Exception as e:
@@ -110,13 +112,33 @@ def write_data_to_csv(data, filename):
 
 
 
-def ask_for_save_location(data):
-    """Ask the user for a location and filename to save the CSV file."""
-    file_path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV files", "*.csv")])
-    if file_path:
-        write_data_to_csv(data, file_path)
-        messagebox.showinfo("Success", f"Data saved to {file_path}")
-        #subprocess.run(["python", "TeeSenseGUI.py", file_path])
+def ask_for_save_location(file_path):
+    """Ask the user if they want to save raw data or filtered data."""
+    response = messagebox.askyesnocancel(
+        "Save Data",
+        "Do you want to save the filtered data?\n\n"
+        "Yes - Save filtered data\n"
+        "No - Save raw data\n"
+        "Cancel - Do not save"
+    )
+
+    if response is None:  # User clicked "Cancel"
+        messagebox.showwarning("No File Selected", "Data was not saved.")
+        return
+
+    save_path = filedialog.asksaveasfilename(
+        title="Save Processed Data",
+        defaultextension=".csv",
+        filetypes=[("CSV files", "*.csv"), ("All files", "*.*")]
+    )
+
+    if save_path:
+        if response:  # User selected "Yes" -> Save filtered data
+            process_filtered_data(file_path, save_path)
+            subprocess.run(["python", "TeeSenseGUI.py", file_path])
+        else:  # User selected "No" -> Save raw data
+            process_unfiltered_data(file_path, save_path)
+            subprocess.run(["python", "TeeSenseGUI.py", file_path])
     else:
         messagebox.showwarning("No File Selected", "No file was selected. Data was not saved.")
 
@@ -150,5 +172,4 @@ def start_main_application(root):
     root.mainloop()
 
 
-# Start the GUI application
 create_gui()
