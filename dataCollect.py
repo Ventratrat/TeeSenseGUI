@@ -73,7 +73,7 @@ def read_from_serial():
     try:
         while not stop_thread:
             if ser.in_waiting > 0:
-                byte = ser.read(1)
+                byte = ser.read(4)
                 if byte:
                     byte_buffer.append(byte)
                     if start_time is None:
