@@ -58,11 +58,9 @@ class Ui_MainWindow(object):
         # Actions
         self.actionOpen = QtWidgets.QAction(MainWindow, text="Open")
         self.actionSave = QtWidgets.QAction(MainWindow, text="Save")
-        self.actionExport = QtWidgets.QAction(MainWindow, text="Export")
 
         self.menuFile.addAction(self.actionOpen)
         self.menuFile.addAction(self.actionSave)
-        self.menuFile.addAction(self.actionExport)
         self.menubar.addAction(self.menuFile.menuAction())
 
         self.retranslateUi(MainWindow)
@@ -131,7 +129,6 @@ class Ui_MainWindow(object):
         self.menuEdit.setTitle(_translate("MainWindow", "&Edit"))
         self.actionOpen.setShortcut(_translate("MainWindow", "Ctrl+O"))
         self.actionSave.setShortcut(_translate("MainWindow", "Ctrl+S"))
-        self.actionExport.setText(_translate("MainWindow", "Export"))
 
     def handle_open_action(self):
         """Handles opening a new file."""
@@ -167,12 +164,6 @@ if __name__ == "__main__":
     MainWindow = QtWidgets.QMainWindow()
     ui = Ui_MainWindow()
     ui.setupUi(MainWindow)
-
-    # Check if a file path is provided as an argument
-    if len(sys.argv) > 1:
-        file_path = sys.argv[1]
-        if os.path.exists(file_path) and file_path.endswith('.csv'):
-            ui.open_excel_file(file_path)
 
     MainWindow.show()
     sys.exit(app.exec_())
