@@ -68,7 +68,7 @@ def read_from_serial():
     global data
     data = []
     byte_buffer = []
-    start_time = time.time()
+    start_time = None
 
     try:
         while not stop_thread:
@@ -76,12 +76,14 @@ def read_from_serial():
                 byte = ser.read(1)
                 if byte:
                     byte_buffer.append(byte)
+                    if start_time is None:
+                        start_time = time.time()
 
                 if len(byte_buffer) == 4:
-                    elapsed_time_ms = int((time.time() - start_time) * 1000)  # Time in milliseconds
+                    elapsed_time_ms = round((time.time() - start_time), 2)
                     byte_values = [int.from_bytes(b, byteorder='big') for b in byte_buffer]
                     data.append([elapsed_time_ms] + byte_values)
-                    print(f"Received: {byte_values} (Elapsed Time: {elapsed_time_ms} ms)")
+                    print(f"Received: {byte_values} (Elapsed Time: {elapsed_time_ms} s)")
                     byte_buffer = [] 
                     
                 if len(data) >= 200:
@@ -112,7 +114,7 @@ def write_data_to_csv(data, filename):
 
 
 
-def ask_for_save_location(file_path):
+def ask_for_save_location(data):
     """Ask the user if they want to save raw data or filtered data."""
     response = messagebox.askyesnocancel(
         "Save Data",
@@ -133,14 +135,17 @@ def ask_for_save_location(file_path):
     )
 
     if save_path:
+        write_data_to_csv(data, save_path)  # This ensures the file exists before processing
+        
         if response:  # User selected "Yes" -> Save filtered data
-            process_filtered_data(file_path, save_path)
-            subprocess.run(["python", "TeeSenseGUI.py", file_path])
+            process_filtered_data(save_path)
         else:  # User selected "No" -> Save raw data
-            process_unfiltered_data(file_path, save_path)
-            subprocess.run(["python", "TeeSenseGUI.py", file_path])
+            process_unfiltered_data(save_path)
+
+        subprocess.run(["python", "TeeSenseGUI.py", save_path])
     else:
         messagebox.showwarning("No File Selected", "No file was selected. Data was not saved.")
+
 
 def create_gui():
     """Create the GUI window and start the main loop."""
