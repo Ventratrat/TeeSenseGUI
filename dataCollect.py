@@ -81,7 +81,8 @@ def read_from_serial():
 
                 if len(byte_buffer) == 4:
                     elapsed_time_ms = round((time.time() - start_time), 2)
-                    byte_values = [int.from_bytes(b, byteorder='big') for b in byte_buffer]
+                    byte_values = [b[0] for b in byte_buffer]
+                    #byte_values = [int.from_bytes(b, byteorder='big') for b in byte_buffer]
                     data.append([elapsed_time_ms] + byte_values)
                     print(f"Received: {byte_values} (Elapsed Time: {elapsed_time_ms} s)")
                     byte_buffer = [] 
