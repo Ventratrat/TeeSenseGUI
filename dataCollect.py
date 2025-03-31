@@ -30,7 +30,7 @@ def on_select_port():
     if port:
         global ser
         try:
-            ser = serial.Serial(port, 115200)
+            ser = serial.Serial(port, 115200,  parity=serial.PARITY_NONE, bytesize=serial.EIGHTBITS, timeout=1)
             ser.flushInput()
             status_label.config(text=f"Connected to {port}", foreground="green")
             show_reading_buttons()
@@ -73,7 +73,7 @@ def read_from_serial():
     try:
         while not stop_thread:
             if ser.in_waiting > 0:
-                byte = ser.read(4)
+                byte = ser.read(1)
                 if byte:
                     byte_buffer.append(byte)
                     if start_time is None:
@@ -81,8 +81,7 @@ def read_from_serial():
 
                 if len(byte_buffer) == 4:
                     elapsed_time_ms = round((time.time() - start_time), 2)
-                    byte_values = [b[0] for b in byte_buffer]
-                    #byte_values = [int.from_bytes(b, byteorder='big') for b in byte_buffer]
+                    byte_values = [int.from_bytes(b, byteorder='big') for b in byte_buffer]
                     data.append([elapsed_time_ms] + byte_values)
                     print(f"Received: {byte_values} (Elapsed Time: {elapsed_time_ms} s)")
                     byte_buffer = [] 
