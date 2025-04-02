@@ -64,30 +64,40 @@ def start_reading():
 
 
 def read_from_serial():
-    """Read data from the serial port and store it in a CSV file."""
+    """Read ASCII data from the serial port and convert it to numbers."""
     global data
     data = []
-    byte_buffer = []
+    byte_buffer = b""  # Use bytes object to store ASCII characters
     start_time = None
 
     try:
         while not stop_thread:
             if ser.in_waiting > 0:
-                byte = ser.read(1)
-                if byte:
-                    byte_buffer.append(byte)
+                byte = ser.read(1)  # Read one byte at a time
+                
+                if byte == b'\n':  # End of one line of data
                     if start_time is None:
                         start_time = time.time()
+                    try:
+                        decoded_string = byte_buffer.decode('utf-8').strip()  # Decode bytes to string
+                        values = list(map(int, decoded_string.split()))  # Convert to integers
+                        elapsed_time_ms = round((time.time() - start_time), 2) if start_time else 0
+                        data.append([elapsed_time_ms] + values)
+                        print(f"Received: {values} (Elapsed Time: {elapsed_time_ms} s)")
+                    except ValueError:
+                        print("Error: Unable to parse data:", byte_buffer)
 
-                if len(byte_buffer) == 4:
-                    elapsed_time_ms = round((time.time() - start_time), 2)
-                    byte_values = [int.from_bytes(b, byteorder='big') for b in byte_buffer]
-                    data.append([elapsed_time_ms] + byte_values)
-                    print(f"Received: {byte_values} (Elapsed Time: {elapsed_time_ms} s)")
-                    byte_buffer = [] 
+                    byte_buffer = b""  # Reset buffer after processing
                     
-                if len(data) >= 200:
-                    break
+                    if len(data) >= 200:
+                        break
+
+                else:
+                    byte_buffer += byte  # Append to buffer
+                
+                if start_time is None:
+                    start_time = time.time()
+                    
 
     except serial.SerialException:
         print("Error reading from USB port.")
@@ -96,6 +106,7 @@ def read_from_serial():
 
     if data:
         ask_for_save_location(data)
+
 
 
 
