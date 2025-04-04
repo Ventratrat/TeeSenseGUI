@@ -59,6 +59,8 @@ def start_reading():
     """Start a new thread for reading from the serial port."""
     global stop_thread
     stop_thread = False
+    ser.write(b'RESET\n')
+    time.sleep(0.5)
     reading_thread = threading.Thread(target=read_from_serial, daemon=True)
     reading_thread.start()
 
@@ -67,15 +69,15 @@ def read_from_serial():
     """Read ASCII data from the serial port and convert it to numbers."""
     global data
     data = []
-    byte_buffer = b""  # Use bytes object to store ASCII characters
+    byte_buffer = b"" 
     start_time = None
 
     try:
         while not stop_thread:
             if ser.in_waiting > 0:
-                byte = ser.read(1)  # Read one byte at a time
+                byte = ser.read(1)  
                 
-                if byte == b'\n':  # End of one line of data
+                if byte == b'\n':  
                     if start_time is None:
                         start_time = time.time()
                     try:
@@ -87,13 +89,13 @@ def read_from_serial():
                     except ValueError:
                         print("Error: Unable to parse data:", byte_buffer)
 
-                    byte_buffer = b""  # Reset buffer after processing
+                    byte_buffer = b""  # Reset buffer
                     
                     if len(data) >= 200:
                         break
 
                 else:
-                    byte_buffer += byte  # Append to buffer
+                    byte_buffer += byte  
                 
                 if start_time is None:
                     start_time = time.time()
