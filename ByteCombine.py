@@ -67,6 +67,22 @@ def process_unfiltered_data(file_path):
         print("Save operation canceled.")
 
 
+def moving_average(data, window_size=3):
+    """
+    Applies a simple moving average filter to the data.
+    
+    Parameters:
+    - data: List of floats
+    - window_size: Number of samples to average over
+    
+    Returns:
+    - Smoothed list of values
+    """
+    if window_size < 1:
+        return data 
+    padded = np.pad(data, (window_size//2, window_size-1-window_size//2), mode='edge')
+    return np.convolve(padded, np.ones(window_size)/window_size, mode='valid').tolist()
+
 def process_filtered_data(file_path):
     """
     Processes the ADC byte data, computes averages, and removes outliers.
@@ -80,29 +96,31 @@ def process_filtered_data(file_path):
 
     with open(file_path, 'r') as csvfile:
         reader = csv.reader(csvfile)
-        next(reader, None)  # Skip header if present
+        next(reader, None) 
         for row in reader:
             if len(row) >= 5 and row[1].isdigit() and row[2].isdigit() and row[3].isdigit() and row[4].isdigit():
-                elapsed_time_ms = float(row[0])  # Get the elapsed time
-                adc1 = (int(row[1]) << 8) | int(row[2])  # Combine columns 2 and 3
-                adc2 = (int(row[3]) << 8) | int(row[4])  # Combine columns 4 and 5
-                avg = (adc1 + adc2) / 2.0  # Calculate average
-                avg_values.append(avg)
-                filtered_data.append([elapsed_time_ms, avg])
+                elapsed_time_ms = float(row[0])  
+                adc1 = (int(row[1]) << 8) | int(row[2])  
+                adc2 = (int(row[3]) << 8) | int(row[4]) 
+                avg = (adc1 + adc2) / 2.0
                 
-                # Stop if more than 200 rows are collected
+                mapped_current = (((avg - 68) / 65536.0) * 3.323) / 30.0
+                avg_values.append(mapped_current)
+                filtered_data.append([elapsed_time_ms, mapped_current])
+                
                 if len(filtered_data) >= 200:
                     break
 
-    # Detect and remove outliers from average values
-    cleaned_avg_values = detect_and_remove_outliers(avg_values, window=2, threshold=3)
+    smoothed_values = moving_average(avg_values, window_size=3)
 
-    # Create cleaned data with elapsed time and cleaned average
+    # Outlier removal
+    cleaned_avg_values = detect_and_remove_outliers(smoothed_values, window=2, threshold=3)
+
+
     cleaned_data = []
     for i in range(len(filtered_data)):
         cleaned_data.append([filtered_data[i][0], cleaned_avg_values[i]])
 
-    # Ask user for save location and file name
     save_path = filedialog.asksaveasfilename(
         title="Save Filtered Data",
         defaultextension=".csv",
