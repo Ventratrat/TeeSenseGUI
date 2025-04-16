@@ -52,8 +52,6 @@ def process_unfiltered_data(file_path):
                 avg = (adc1 + adc2) / 2.0
                 unfiltered_data.append([elapsed_time, avg])
                 
-                if len(unfiltered_data) >= 200:
-                    break
 
     save_path = filedialog.asksaveasfilename(
         title="Save Unfiltered Data",
@@ -116,8 +114,6 @@ def process_filtered_data(file_path):
                 avg_values.append(mapped_current)
                 filtered_data.append([elapsed_time, mapped_current])
 
-                if len(filtered_data) >= 200:
-                    break
 
     smoothed_values = moving_average(avg_values, window_size=3)
     cleaned_avg_values = detect_and_remove_outliers(smoothed_values, window=2, threshold=3)
