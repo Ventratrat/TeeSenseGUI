@@ -27,7 +27,6 @@ def generate_plot(csv_file):
     y_min, y_max = min(y), max(y)
 
     x_margin = (x_max - x_min) * 0.1 
-    y_margin = (y_max - y_min) * 0.1 
     x_range = x_max - x_min
     y_range = y_max - y_min
 
@@ -77,27 +76,27 @@ def calculate_parameters(data):
     threshold = 0.8 * column_data.max()
     data_for_max = column_data[column_data >= threshold]
     
-    average_max_current = data_for_max.mean() 
+    average_max_current = data_for_max.mean() * 1000
 
     indices_to_exclude = data_for_max.index
 
     #Filter out data points from max current
     filtered_data_for_min = column_data.drop(indices_to_exclude)
-    average_min_current = filtered_data_for_min.rolling(window=5).min().mean() 
+    average_min_current = filtered_data_for_min.rolling(window=5).min().mean() * 1000 
 
-    overshoot = column_data.max() - average_max_current
+    overshoot = (column_data.max() * 1000) - average_max_current
     pulse_width = (column_data > (average_max_current * 0.9)).sum() 
-    current_rms = np.sqrt(np.mean(column_data**2))
+    current_rms = np.sqrt(np.mean(column_data**2)) * 1000
     settling_time = (column_data > (average_max_current * 0.98)).sum() 
 
     return {
-        "Average Maximum Current": average_max_current,
-        "Average Minimum Current": average_min_current,
-        "Overshoot": overshoot,
-        "Pulse Width": pulse_width,
-        "Current RMS": current_rms,
-        "Settling Time": settling_time
-    }
+        "Average Maximum Current": f"{average_max_current:.4f} µA",
+        "Average Minimum Current": f"{average_min_current:.4f} µA",
+        "Overshoot": f"{overshoot:.4f} uA",
+        "Pulse Width": f"{pulse_width:.4f} s",
+        "Current RMS": f"{current_rms:.4f} uA",
+        "Settling Time": f"{settling_time:.4f} s"
+}
 
 
 def populate_table(tableWidget, data):
@@ -113,6 +112,6 @@ def populate_table(tableWidget, data):
 
     for row, (param, value) in enumerate(stats.items()):
         tableWidget.setItem(row, 0, QtWidgets.QTableWidgetItem(param))  
-        tableWidget.setItem(row, 1, QtWidgets.QTableWidgetItem(f"{value:.4f}"))  
+        tableWidget.setItem(row, 1, QtWidgets.QTableWidgetItem(value))
 
     tableWidget.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
