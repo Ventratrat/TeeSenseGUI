@@ -77,39 +77,39 @@ def start_reading():
 
 
 def read_from_serial():
-    """Read ASCII data from the serial port and convert it to numbers."""
     global data
     data = []
-    byte_buffer = b""
+    buffer = b""
     start_time = None
 
     try:
         while not stop_thread:
             if ser.in_waiting > 0:
-                byte = ser.read(1)
+                # Read all available bytes at once
+                buffer += ser.read(ser.in_waiting)
 
-                if byte == b'\n':
+                # Split lines
+                while b'\n' in buffer:
+                    line, buffer = buffer.split(b'\n', 1)
+                    
                     if start_time is None:
                         start_time = time.time()
-                    try:
-                        decoded_string = byte_buffer.decode('utf-8').strip()
-                        values = list(map(int, decoded_string.split()))
-                        elapsed_time_ms = round((time.time() - start_time), 2)
-                        data.append([elapsed_time_ms] + values)
-                        print(f"Received: {values} (Elapsed Time: {elapsed_time_ms} s)")
-                    except ValueError:
-                        print("Error: Unable to parse data:", byte_buffer)
 
-                    byte_buffer = b""
+                    try:
+                        decoded = line.decode('utf-8').strip()
+                        values = list(map(int, decoded.split()))
+                        elapsed_ms = round((time.time() - start_time), 2)
+                        data.append([elapsed_ms] + values)
+                        print(f"Received: {values} (Elapsed: {elapsed_ms} s)")
+                    except ValueError:
+                        print(f"Parse error: {line}")
 
                     if len(data) >= sample_count:
                         break
-                else:
-                    byte_buffer += byte
-    except serial.SerialException:
-        print("Error reading from USB port.")
+    except serial.SerialException as e:
+        print(f"Serial error: {e}")
     except KeyboardInterrupt:
-        print("Reading stopped by user.")
+        print("Stopped by user.")
 
     if data:
         ask_for_save_location(data)
