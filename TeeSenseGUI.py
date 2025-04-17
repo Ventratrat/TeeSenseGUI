@@ -104,7 +104,7 @@ class Ui_MainWindow(object):
         self.current_file_path = None
         self.is_unsaved = False
         self.y_unit = "mA"
-        self.x_unit = "us"
+        self.x_unit = "s"
         self.unit_scale_y = {"uA": 1000, "mA": 1, "A": 0.001}
         self.unit_scale_x = {"us": 0.000001, "ms": 0.001, "s": 1}
         self.x_div = None
