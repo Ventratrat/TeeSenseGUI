@@ -85,7 +85,32 @@ def calculate_parameters(data):
     average_min_current = filtered_data_for_min.rolling(window=5).min().mean() * 1000 
 
     overshoot = (column_data.max() * 1000) - average_max_current
-    pulse_width = (column_data > (average_max_current * 0.9)).sum() 
+    time_data = numeric_cols.iloc[:, 0]
+    current_data = column_data
+
+    threshold = 0.9 * average_max_current / 1000  # convert mA back to original unit
+    above_threshold = current_data > threshold
+
+    # Find rising and falling edges
+    pulse_start = None
+    pulse_durations = []
+
+    for i in range(len(above_threshold)):
+        if above_threshold.iloc[i] and pulse_start is None:
+            pulse_start = time_data.iloc[i]
+        elif not above_threshold.iloc[i] and pulse_start is not None:
+            pulse_end = time_data.iloc[i]
+            pulse_durations.append(pulse_end - pulse_start)
+            pulse_start = None
+
+    # Handle case where pulse continues till end
+    if pulse_start is not None:
+        pulse_end = time_data.iloc[-1]
+        pulse_durations.append(pulse_end - pulse_start)
+
+    # Take the average pulse width (or sum if only one expected)
+    pulse_width = np.mean(pulse_durations) if pulse_durations else 0
+    
     current_rms = np.sqrt(np.mean(column_data**2)) * 1000
     settling_time = (column_data > (average_max_current * 0.98)).sum() 
 
