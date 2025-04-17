@@ -6,23 +6,26 @@ from tkinter import filedialog
 def detect_and_remove_outliers(data, window=2, threshold=3):
     """
     Detects and removes outliers by comparing each point with its neighbors.
-    
+
     Parameters:
     - data: List of numerical values
-    - window: Number of neighboring points to consider on each side
-    - threshold: Factor by which a point must deviate to be considered an outlier
-    
+    - window: Number of neighboring points to consider on each side (only window=1 supported here)
+    - threshold: Absolute deviation threshold to be considered an outlier
+
     Returns:
-    - Cleaned list with outliers replaced by median of neighbors
+    - Cleaned list with outliers replaced by average of neighbors
     """
+    if window != 1:
+        raise ValueError("This implementation supports only window=1 for averaging two neighbors.")
+
     data_array = np.array(data)
     cleaned_data = data_array.copy()
-    
+
     for i in range(window, len(data_array) - window):
-        local_median = np.median(data_array[i - window : i + window + 1])
-        if abs(data_array[i] - local_median) > threshold:
-            cleaned_data[i] = local_median 
-    
+        neighbor_avg = (data_array[i - 1] + data_array[i + 1]) / 2.0
+        if abs(data_array[i] - neighbor_avg) > threshold:
+            cleaned_data[i] = neighbor_avg
+
     return cleaned_data.tolist()
 
 def process_unfiltered_data(file_path):
