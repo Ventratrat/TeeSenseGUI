@@ -21,7 +21,7 @@ def detect_and_remove_outliers(data, window=2, threshold=3):
     for i in range(window, len(data_array) - window):
         local_median = np.median(data_array[i - window : i + window + 1])
         if abs(data_array[i] - local_median) > threshold:
-            cleaned_data[i] = local_median  # Replace outlier with median of neighbors
+            cleaned_data[i] = local_median 
     
     return cleaned_data.tolist()
 
@@ -106,7 +106,7 @@ def process_filtered_data(file_path):
 
         for i, row in enumerate(rows[1:]):
             if len(row) >= 5 and all(cell.isdigit() for cell in row[1:5]):
-                elapsed_time = round(i * time_per_sample, 6)
+                elapsed_time = round(i * time_per_sample, 9)
                 adc1 = (int(row[1]) << 8) | int(row[2])
                 adc2 = (int(row[3]) << 8) | int(row[4])
                 avg = (adc1 + adc2) / 2.0
@@ -114,11 +114,10 @@ def process_filtered_data(file_path):
                 avg_values.append(mapped_current)
                 filtered_data.append([elapsed_time, mapped_current])
 
+    cleaned_avg_values = detect_and_remove_outliers(avg_values, window=2, threshold=3)
+    smoothed_values = moving_average(cleaned_avg_values, window_size=3)
 
-    smoothed_values = moving_average(avg_values, window_size=3)
-    cleaned_avg_values = detect_and_remove_outliers(smoothed_values, window=2, threshold=3)
-
-    cleaned_data = [[filtered_data[i][0], cleaned_avg_values[i]] for i in range(len(filtered_data))]
+    cleaned_data = [[filtered_data[i][0], smoothed_values[i]] for i in range(len(filtered_data))]
 
     save_path = filedialog.asksaveasfilename(
         title="Save Filtered Data",
