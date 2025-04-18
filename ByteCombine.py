@@ -101,13 +101,16 @@ def process_filtered_data(file_path):
             current_time = time_stamps[i]
 
             # Check if there's a large mismatch between adc1 and adc2
-            if min(adc1, adc2) / max(adc1, adc2) < 0.5:
+            if max(adc1, adc2) == 0:
+                chosen_adc = (prev_avg + next_avg) / 2  # fallback to neighbors' average
+            elif min(adc1, adc2) / max(adc1, adc2) < 0.5:
                 if adc1 > adc2:
                     chosen_adc = adc1 if (prev_avg + next_avg) / 2 > adc1 else adc2
                 else:
                     chosen_adc = adc2 if (prev_avg + next_avg) / 2 > adc2 else adc1
             else:
                 chosen_adc = (adc1 + adc2) / 2.0
+
 
             mapped_current = (((chosen_adc - 68) / 65536.0) * 3.323) / 30.0
             mapped_values.append(mapped_current)
