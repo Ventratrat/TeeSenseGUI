@@ -3,29 +3,6 @@ import numpy as np
 import tkinter as tk
 from tkinter import filedialog
 
-def detect_and_remove_outliers(data, window=2, threshold=3):
-    """
-    Detects and removes outliers by comparing each point with its neighbors.
-    
-    Parameters:
-    - data: List of numerical values
-    - window: Number of neighboring points to consider on each side
-    - threshold: Factor by which a point must deviate to be considered an outlier
-    
-    Returns:
-    - Cleaned list with outliers replaced by median of neighbors
-    """
-    data_array = np.array(data)
-    cleaned_data = data_array.copy()
-    
-    for i in range(window, len(data_array) - window):
-        avg_value = np.mean([data_array[i - 2], data_array[i - 1], data_array[i + 1], data_array[i + 2]])
-
-        if abs(data_array[i] - avg_value) > threshold:
-            cleaned_data[i] = avg_value 
-    
-    return cleaned_data.tolist()
-
 def process_unfiltered_data(file_path):
     avg_values = []
     unfiltered_data = []
@@ -71,7 +48,6 @@ def process_unfiltered_data(file_path):
     else:
         print("Save operation canceled.")
 
-
 def moving_average(data, window_size=3):
     """
     Applies a simple moving average filter to the data.
@@ -89,15 +65,15 @@ def moving_average(data, window_size=3):
     return np.convolve(padded, np.ones(window_size)/window_size, mode='valid').tolist()
 
 def process_filtered_data(file_path):
-    avg_values = []
     filtered_data = []
+    mapped_values = []
 
     with open(file_path, 'r') as csvfile:
         reader = csv.reader(csvfile)
         next(reader, None)
         rows = list(reader)
 
-        if len(rows) < 2:
+        if len(rows) < 4:
             print("Not enough data.")
             return
 
@@ -107,20 +83,40 @@ def process_filtered_data(file_path):
         num_samples = len(rows) - 1
         time_per_sample = total_time_sec / num_samples
 
+        adc_pairs = []
+        time_stamps = []
+
         for i, row in enumerate(rows[1:]):
             if len(row) >= 5 and all(cell.isdigit() for cell in row[1:5]):
                 elapsed_time = round(i * time_per_sample, 9)
                 adc1 = (int(row[1]) << 8) | int(row[2])
                 adc2 = (int(row[3]) << 8) | int(row[4])
-                avg = (adc1 + adc2) / 2.0
-                mapped_current = (((avg - 68) / 65536.0) * 3.323) / 30.0
-                avg_values.append(mapped_current)
-                filtered_data.append([elapsed_time, mapped_current])
+                adc_pairs.append((adc1, adc2))
+                time_stamps.append(elapsed_time)
 
-    cleaned_avg_values = detect_and_remove_outliers(avg_values, window=2, threshold=3)
-    smoothed_values = moving_average(cleaned_avg_values, window_size=3)
+        for i in range(1, len(adc_pairs) - 1):
+            adc1, adc2 = adc_pairs[i]
+            prev_avg = sum(adc_pairs[i - 1]) / 2
+            next_avg = sum(adc_pairs[i + 1]) / 2
+            current_time = time_stamps[i]
 
-    cleaned_data = [[filtered_data[i][0], smoothed_values[i]] for i in range(len(filtered_data))]
+            # Check if there's a large mismatch between adc1 and adc2
+            if min(adc1, adc2) / max(adc1, adc2) < 0.5:
+                if adc1 > adc2:
+                    chosen_adc = adc1 if (prev_avg + next_avg) / 2 > adc1 else adc2
+                else:
+                    chosen_adc = adc2 if (prev_avg + next_avg) / 2 > adc2 else adc1
+            else:
+                chosen_adc = (adc1 + adc2) / 2.0
+
+            mapped_current = (((chosen_adc - 68) / 65536.0) * 3.323) / 30.0
+            mapped_values.append(mapped_current)
+            filtered_data.append([current_time, mapped_current])
+
+    # Smooth the values
+    cleaned_values = moving_average(mapped_values, window_size=3)
+
+    cleaned_data = [[filtered_data[i][0], cleaned_values[i]] for i in range(len(filtered_data))]
 
     save_path = filedialog.asksaveasfilename(
         title="Save Filtered Data",
@@ -136,6 +132,3 @@ def process_filtered_data(file_path):
         print(f"Filtered data saved to {save_path}.")
     else:
         print("Save operation canceled.")
-
-        
-
