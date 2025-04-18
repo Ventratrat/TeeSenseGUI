@@ -6,41 +6,39 @@ from tkinter import filedialog
 def detect_and_remove_outliers(data, window=2, threshold=3):
     """
     Detects and removes outliers by comparing each point with its neighbors.
-
+    
     Parameters:
     - data: List of numerical values
-    - window: Number of neighboring points to consider on each side (only window=1 supported here)
-    - threshold: Absolute deviation threshold to be considered an outlier
-
+    - window: Number of neighboring points to consider on each side
+    - threshold: Factor by which a point must deviate to be considered an outlier
+    
     Returns:
-    - Cleaned list with outliers replaced by average of neighbors
+    - Cleaned list with outliers replaced by median of neighbors
     """
-    if window != 1:
-        raise ValueError("This implementation supports only window=1 for averaging two neighbors.")
-
     data_array = np.array(data)
     cleaned_data = data_array.copy()
-
+    
     for i in range(window, len(data_array) - window):
-        neighbor_avg = (data_array[i - 1] + data_array[i + 1]) / 2.0
-        if abs(data_array[i] - neighbor_avg) > threshold:
-            cleaned_data[i] = neighbor_avg
+        avg_value = np.mean([data_array[i - 2], data_array[i - 1], data_array[i + 1], data_array[i + 2]])
 
+        if abs(data_array[i] - avg_value) > threshold:
+            cleaned_data[i] = avg_value 
+    
     return cleaned_data.tolist()
 
 def process_unfiltered_data(file_path):
+    avg_values = []
     unfiltered_data = []
 
     with open(file_path, 'r') as csvfile:
         reader = csv.reader(csvfile)
-        next(reader, None)  # Skip header
+        next(reader, None)
         rows = list(reader)
 
         if len(rows) < 2:
             print("Not enough data.")
             return
 
-        # First row is the total time in 32-bit value
         t_row = rows[0]
         total_cycles = (int(t_row[1]) << 24) | (int(t_row[2]) << 16) | (int(t_row[3]) << 8) | int(t_row[4])
         total_time_sec = total_cycles / 550_000_000.0
@@ -49,11 +47,13 @@ def process_unfiltered_data(file_path):
 
         for i, row in enumerate(rows[1:]):
             if len(row) >= 5 and all(cell.isdigit() for cell in row[1:5]):
-                elapsed_time = round(i * time_per_sample, 6)
+                elapsed_time = round(i * time_per_sample, 9)
                 adc1 = (int(row[1]) << 8) | int(row[2])
                 adc2 = (int(row[3]) << 8) | int(row[4])
                 avg = (adc1 + adc2) / 2.0
-                unfiltered_data.append([elapsed_time, avg])
+                mapped_current = (((avg - 68) / 65536.0) * 3.323) / 30.0
+                avg_values.append(mapped_current)
+                unfiltered_data.append([elapsed_time, mapped_current])
                 
 
     save_path = filedialog.asksaveasfilename(
