@@ -23,6 +23,10 @@ def generate_plot(csv_file):
     if len(x) == 0 or len(y) == 0:
         raise ValueError("No valid data found in the CSV file.")
 
+    # --- Correcting for negative offset --- 
+    negative_offset = np.mean([val for val in y if val < 0]) if any(val < 0 for val in y) else 0
+    y = [val - negative_offset for val in y]  # Shift all data by the negative offset
+
     x_min, x_max = min(x), max(x)
     y_min, y_max = min(y), max(y)
 
@@ -70,58 +74,65 @@ def calculate_parameters(data):
     if numeric_cols.shape[1] < 2: 
         return None
 
-    column_data = numeric_cols.iloc[:, 1]  
-    
-    max = column_data.max()
+    # Sort the data by time to avoid negative durations
+    data = data.sort_values(by=data.columns[0]).reset_index(drop=True)
+    numeric_cols = data.select_dtypes(include=['number'])
+
+    time_data = numeric_cols.iloc[:, 0]  # time in seconds
+    column_data = numeric_cols.iloc[:, 1]  # current
+
+    negative_offset = column_data[column_data < 0].mean() if column_data[column_data < 0].any() else 0
+    column_data = column_data - negative_offset  # Shift all data by the negative offset
+
+    # --- Max Current Analysis ---
     threshold = 0.8 * column_data.max()
     data_for_max = column_data[column_data >= threshold]
-    
-    average_max_current = data_for_max.mean() * 1000
-
+    average_max_current = data_for_max.mean() * 1e6  # in µA
     indices_to_exclude = data_for_max.index
 
-    #Filter out data points from max current
+    # --- Min Current Analysis ---
     filtered_data_for_min = column_data.drop(indices_to_exclude)
-    average_min_current = filtered_data_for_min.rolling(window=5).min().mean() * 1000 
+    average_min_current = filtered_data_for_min.rolling(window=5).min().mean() * 1e6  # in µA
 
-    overshoot = (column_data.max() * 1000) - average_max_current
-    time_data = numeric_cols.iloc[:, 0]
-    current_data = column_data
+    # --- Overshoot ---
+    overshoot = (column_data.max() * 1e6) - average_max_current
 
-    threshold = 0.9 * average_max_current / 1000  # convert mA back to original unit
-    above_threshold = current_data > threshold
-
-    # Find rising and falling edges
-    pulse_start = None
+    # --- Pulse Width (in µs) ---
     pulse_durations = []
+    time_indices = data_for_max.index.to_list()
 
-    for i in range(len(above_threshold)):
-        if above_threshold.iloc[i] and pulse_start is None:
-            pulse_start = time_data.iloc[i]
-        elif not above_threshold.iloc[i] and pulse_start is not None:
-            pulse_end = time_data.iloc[i]
-            pulse_durations.append(pulse_end - pulse_start)
-            pulse_start = None
+    if time_indices:
+        grouped_indices = [[time_indices[0]]]
+        for idx in time_indices[1:]:
+            if idx == grouped_indices[-1][-1] + 1:
+                grouped_indices[-1].append(idx)
+            else:
+                grouped_indices.append([idx])
 
-    # Handle case where pulse continues till end
-    if pulse_start is not None:
-        pulse_end = time_data.iloc[-1]
-        pulse_durations.append(pulse_end - pulse_start)
+        for group in grouped_indices:
+            start_time = time_data.iloc[group[0]]
+            end_time = time_data.iloc[group[-1]]
+            duration_us = (end_time - start_time) * 1e6
+            if duration_us > 0:
+                pulse_durations.append(duration_us)
 
-    # Take the average pulse width (or sum if only one expected)
     pulse_width = np.mean(pulse_durations) if pulse_durations else 0
-    
-    current_rms = np.sqrt(np.mean(column_data**2)) * 1000
-    settling_time = (column_data > (average_max_current * 0.98)).sum() 
 
+    # --- RMS Current ---
+    current_rms = np.sqrt(np.mean(column_data**2)) * 1e6  # µA
+
+    # --- Settling Time (placeholder logic, can be improved) ---
+    settling_time = (column_data > (average_max_current * 0.98 / 1e6)).sum()  # s (count of samples above threshold)
+
+    # --- Return results ---
     return {
         "Average Maximum Current": f"{average_max_current:.4f} µA",
         "Average Minimum Current": f"{average_min_current:.4f} µA",
-        "Overshoot": f"{overshoot:.4f} uA",
-        "Pulse Width": f"{pulse_width:.4f} s",
-        "Current RMS": f"{current_rms:.4f} uA",
-        "Settling Time": f"{settling_time:.4f} s"
-}
+        "Overshoot": f"{overshoot:.4f} µA",
+        "Pulse Width": f"{pulse_width:.4f} µs",
+        "Current RMS": f"{current_rms:.4f} µA",
+        "Settling Time": f"{settling_time:.4f} µs"
+    }
 
 
 def populate_table(tableWidget, data):
