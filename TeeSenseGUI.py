@@ -105,8 +105,8 @@ class Ui_MainWindow(object):
         self.is_unsaved = False
         self.y_unit = "A"
         self.x_unit = "s"
-        self.unit_scale_y = {"uA": 1000000, "mA": 100, "A": 1}
-        self.unit_scale_x = {"us": 1000000, "ms": 100, "s": 1}
+        self.unit_scale_y = {"uA": 1e6, "mA": 1e3, "A": 1}
+        self.unit_scale_x = {"us": 1e6, "ms": 1e3, "s": 1}
         self.x_div = None
         self.y_div = None
         self.x_min = None
