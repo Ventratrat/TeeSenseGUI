@@ -99,30 +99,55 @@ def calculate_parameters(data):
 
     # --- Pulse Width (in µs) ---
     pulse_durations = []
-    time_indices = data_for_max.index.to_list()
+    in_pulse = False
+    pulse_start_time = None
 
-    if time_indices:
-        grouped_indices = [[time_indices[0]]]
-        for idx in time_indices[1:]:
-            if idx == grouped_indices[-1][-1] + 1:
-                grouped_indices[-1].append(idx)
-            else:
-                grouped_indices.append([idx])
+    for i in range(1, len(column_data) - 1):
+        prev = column_data.iloc[i - 1]
+        curr = column_data.iloc[i]
+        next_val = column_data.iloc[i + 1]
+        current_time = time_data.iloc[i]
 
-        for group in grouped_indices:
-            start_time = time_data.iloc[group[0]]
-            end_time = time_data.iloc[group[-1]]
-            duration_us = (end_time - start_time) * 1e6
+        # Detect rising edge start
+        if not in_pulse and curr > prev and curr >= next_val:
+            in_pulse = True
+            pulse_start_time = current_time
+
+        # Detect falling edge end
+        elif in_pulse and curr < prev and curr <= next_val:
+            in_pulse = False
+            pulse_end_time = current_time
+            duration_us = (pulse_end_time - pulse_start_time) * 1e7
             if duration_us > 0:
                 pulse_durations.append(duration_us)
 
     pulse_width = np.mean(pulse_durations) if pulse_durations else 0
 
+
+
     # --- RMS Current ---
     current_rms = np.sqrt(np.mean(column_data**2)) * 1e6  # µA
 
-    # --- Settling Time (placeholder logic, can be improved) ---
-    settling_time = (column_data > (average_max_current * 0.98 / 1e6)).sum()  # s (count of samples above threshold)
+    # --- Settling Time ---
+    settling_threshold = 0.02 * (average_max_current / 1e6)  # 2% in original units
+    final_value = average_max_current / 1e6  # convert to original unit
+    lower_bound = final_value - settling_threshold
+    upper_bound = final_value + settling_threshold
+
+    settling_time = 0
+    in_settling = False
+
+    for i in range(len(column_data)):
+        if in_settling:
+            if lower_bound <= column_data.iloc[i] <= upper_bound:
+                settling_time = time_data.iloc[i] - pulse_start_time
+                break
+        elif i > 0 and column_data.iloc[i] > column_data.iloc[i - 1]:
+            # Detect rising edge (start of pulse)
+            pulse_start_time = time_data.iloc[i]
+            in_settling = True
+
+    settling_time_us = settling_time * 1e6 if settling_time else 0  # Convert to µs
 
     # --- Return results ---
     return {
