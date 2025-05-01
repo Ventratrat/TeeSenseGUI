@@ -109,7 +109,7 @@ class Ui_MainWindow(object):
         self.unit_scale_x = {"us": 1e6, "ms": 1e3, "s": 1}
         self.x_div = None
         self.y_div = None
-        self.x_min = None
+        self.x_min = 0
         self.x_max = None
         self.y_min = None
         self.y_max = None
