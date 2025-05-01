@@ -30,7 +30,6 @@ def generate_plot(csv_file):
     x_min, x_max = min(x), max(x)
     y_min, y_max = min(y), max(y)
 
-    x_margin = (x_max - x_min) * 0.1 
     x_range = x_max - x_min
     y_range = y_max - y_min
 
@@ -42,10 +41,8 @@ def generate_plot(csv_file):
     figure, ax = plt.subplots()
     ax.plot(x, y, color='g', linestyle='dashed', marker='o', label="Current")
 
-    ax.set_xlim(x_min - x_margin, x_max + x_margin)
+    ax.set_xlim(0, x_max + x_step)
     ax.set_ylim(y_min_adjusted, y_max_adjusted) 
-    ax.set_xticks(np.arange(0, x_max + x_margin, step=x_step))
-    ax.set_yticks(np.arange(y_min_adjusted, y_max_adjusted, step=y_step))
 
     ax.set_xlabel('Input') 
     ax.set_ylabel('Output') 
@@ -127,27 +124,41 @@ def calculate_parameters(data):
 
     # --- RMS Current ---
     current_rms = np.sqrt(np.mean(column_data**2)) * 1e6  # µA
-
+    
     # --- Settling Time ---
-    settling_threshold = 0.02 * (average_max_current / 1e6)  # 2% in original units
-    final_value = average_max_current / 1e6  # convert to original unit
-    lower_bound = final_value - settling_threshold
-    upper_bound = final_value + settling_threshold
+    settling_times = []
+    i = 1
+    while i < len(column_data) - 2:
+        # Detect rising edge (start of new pulse)
+        if column_data.iloc[i] > column_data.iloc[i - 1] and column_data.iloc[i] >= column_data.iloc[i + 1]:
+            pulse_start_index = i
+            T1 = None
+            T2 = None
 
-    settling_time = 0
-    in_settling = False
+            # Analyze ringing after rising edge
+            pulse_derivative = np.diff(column_data.iloc[pulse_start_index:].values)
+            sign_changes = np.diff(np.sign(pulse_derivative))
 
-    for i in range(len(column_data)):
-        if in_settling:
-            if lower_bound <= column_data.iloc[i] <= upper_bound:
-                settling_time = time_data.iloc[i] - pulse_start_time
-                break
-        elif i > 0 and column_data.iloc[i] > column_data.iloc[i - 1]:
-            # Detect rising edge (start of pulse)
-            pulse_start_time = time_data.iloc[i]
-            in_settling = True
+            for j in range(1, len(sign_changes)):
+                if sign_changes[j] != 0:
+                    idx = pulse_start_index + j + 1  # Offset due to np.diff
+                    current_time = time_data.iloc[idx]
+                    if T1 is None:
+                        T1 = current_time
+                    T2 = current_time  # last direction change before settling
 
-    settling_time_us = settling_time * 1e6 if settling_time else 0  # Convert to µs
+                # Early exit if signal flattens out
+                if j > 10 and np.all(sign_changes[j-5:j] == 0):
+                    break
+
+            if T1 is not None and T2 is not None:
+                settling_times.append((T2 - T1) * 1e6)  # µs
+            i += 20  # Skip ahead to avoid overlapping pulses
+        else:
+            i += 1
+
+    average_settling_time_us = np.mean(settling_times) if settling_times else 0
+
 
     # --- Return results ---
     return {
@@ -156,7 +167,7 @@ def calculate_parameters(data):
         "Overshoot": f"{overshoot:.4f} µA",
         "Pulse Width": f"{pulse_width:.4f} µs",
         "Current RMS": f"{current_rms:.4f} µA",
-        "Settling Time": f"{settling_time:.4f} µs"
+        "Settling Time": f"{average_settling_time_us:.4f} µs"
     }
 
 
