@@ -25,7 +25,7 @@ def generate_plot(csv_file):
 
     # --- Correcting for negative offset --- 
     negative_offset = np.mean([val for val in y if val < 0]) if any(val < 0 for val in y) else 0
-    y = [val - negative_offset for val in y]  # Shift all data by the negative offset
+    y = [val - negative_offset for val in y] 
 
     x_min, x_max = min(x), max(x)
     y_min, y_max = min(y), max(y)
@@ -93,6 +93,7 @@ def calculate_parameters(data):
 
     # --- Overshoot ---
     overshoot = (column_data.max() * 1e6) - average_max_current
+    OS_percent = overshoot/average_max_current * 100
 
     # --- Pulse Width (in µs) ---
     pulse_durations = []
@@ -129,31 +130,28 @@ def calculate_parameters(data):
     settling_times = []
     i = 1
     while i < len(column_data) - 2:
-        # Detect rising edge (start of new pulse)
         if column_data.iloc[i] > column_data.iloc[i - 1] and column_data.iloc[i] >= column_data.iloc[i + 1]:
             pulse_start_index = i
             T1 = None
             T2 = None
 
-            # Analyze ringing after rising edge
             pulse_derivative = np.diff(column_data.iloc[pulse_start_index:].values)
             sign_changes = np.diff(np.sign(pulse_derivative))
 
             for j in range(1, len(sign_changes)):
                 if sign_changes[j] != 0:
-                    idx = pulse_start_index + j + 1  # Offset due to np.diff
+                    idx = pulse_start_index + j + 1 
                     current_time = time_data.iloc[idx]
                     if T1 is None:
                         T1 = current_time
-                    T2 = current_time  # last direction change before settling
+                    T2 = current_time 
 
-                # Early exit if signal flattens out
                 if j > 10 and np.all(sign_changes[j-5:j] == 0):
                     break
 
             if T1 is not None and T2 is not None:
                 settling_times.append((T2 - T1) * 1e6)  # µs
-            i += 20  # Skip ahead to avoid overlapping pulses
+            i += 20 
         else:
             i += 1
 
@@ -164,7 +162,7 @@ def calculate_parameters(data):
     return {
         "Average Maximum Current": f"{average_max_current:.4f} µA",
         "Average Minimum Current": f"{average_min_current:.4f} µA",
-        "Overshoot": f"{overshoot:.4f} µA",
+        "Overshoot": f"{overshoot:.4f} µA ({OS_percent:.2f} %)",
         "Pulse Width": f"{pulse_width:.4f} µs",
         "Current RMS": f"{current_rms:.4f} µA",
         "Settling Time": f"{average_settling_time_us:.4f} µs"
