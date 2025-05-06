@@ -233,6 +233,12 @@ if __name__ == "__main__":
     MainWindow = QtWidgets.QMainWindow()
     ui = Ui_MainWindow()
     ui.setupUi(MainWindow)
+
+    if len(sys.argv) > 1 and sys.argv[1].endswith(".csv"):
+        csv_path = sys.argv[1]
+        ui.current_file_path = csv_path
+        ui.open_excel_file(csv_path)
+
     MainWindow.setWindowTitle("TeeSense Current Pulse Display")
     MainWindow.show()
     sys.exit(app.exec_())
