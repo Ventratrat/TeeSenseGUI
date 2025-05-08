@@ -61,6 +61,15 @@ def generate_plot(csv_file):
 
     return figure
 
+def format_current(value_in_uA):
+    """Converts a value in µA to an appropriate unit (µA, mA, A) with formatting."""
+    if value_in_uA / 1_000_000 >= 1:
+        return f"{value_in_uA / 1_000_000:.4f} A"
+    elif value_in_uA / 1_000 >= 1:
+        return f"{value_in_uA / 1_000:.4f} mA"
+    else:
+        return f"{value_in_uA:.4f} µA"
+
 
 def calculate_parameters(data):
     """Calculates key electrical parameters from a numerical signal dataset."""
@@ -82,7 +91,7 @@ def calculate_parameters(data):
     column_data = column_data - negative_offset  # Shift all data by the negative offset
 
     # --- Max Current Analysis ---
-    threshold = 0.8 * column_data.max()
+    threshold = 0.7 * column_data.max()
     data_for_max = column_data[column_data >= threshold]
     average_max_current = data_for_max.mean() * 1e6  # in µA
     indices_to_exclude = data_for_max.index
@@ -123,7 +132,9 @@ def calculate_parameters(data):
     overshoot = overshoot_peak - settled_current
     OS_percent = (overshoot / settled_current * 100) if settled_current != 0 else 0
 
-
+    if OS_percent < 0 or OS_percent > 100:
+        overshoot = overshoot_peak - average_max_current
+        OS_percent = (overshoot/average_max_current * 100)
 
 
     # --- Pulse Width (in µs) ---
@@ -181,13 +192,14 @@ def calculate_parameters(data):
 
     # --- Return results ---
     return {
-        "Average Maximum Current": f"{average_max_current:.4f} µA",
-        "Average Minimum Current": f"{average_min_current:.4f} µA",
-        "Overshoot": f"{overshoot:.4f} µA ({OS_percent:.2f} %)",
+        "Average Maximum Current": format_current(average_max_current),
+        "Average Minimum Current": format_current(average_min_current),
+        "Overshoot": f"{format_current(overshoot)} ({OS_percent:.2f} %)",
         "Pulse Width": f"{pulse_width:.4f} µs",
-        "Current RMS": f"{current_rms:.4f} µA",
+        "Current RMS": format_current(current_rms),
         "Settling Time": f"{settling_time_us:.4f} µs"
     }
+
 
 
 def populate_table(tableWidget, data):
