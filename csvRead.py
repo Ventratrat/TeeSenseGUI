@@ -92,8 +92,39 @@ def calculate_parameters(data):
     average_min_current = filtered_data_for_min.rolling(window=5).min().mean() * 1e6  # in µA
 
     # --- Overshoot ---
-    overshoot = (column_data.max() * 1e6) - average_max_current
-    OS_percent = overshoot/average_max_current * 100
+    in_pulse = False
+    pulse_start_time = None
+    pulse_end_index = None
+
+    # Detect first pulse's start and end
+    for i in range(1, len(column_data) - 1):
+        prev = column_data.iloc[i - 1]
+        curr = column_data.iloc[i]
+        next_val = column_data.iloc[i + 1]
+        current_time = time_data.iloc[i]
+
+        if not in_pulse and curr > prev and curr >= next_val:
+            in_pulse = True
+            pulse_start_time = current_time
+
+        elif in_pulse and curr < prev and curr <= next_val:
+            in_pulse = False
+            pulse_end_index = i
+            break
+
+    # Estimate settled current from 50 samples after waiting 50 samples past pulse end
+    settled_current = 0
+    if pulse_end_index is not None and pulse_end_index + 100 < len(column_data):
+        settled_region = column_data.iloc[pulse_end_index + 50 : pulse_end_index + 100]
+        settled_current = settled_region.mean() * 1e6  # µA
+
+    # Overshoot = peak - settled
+    overshoot_peak = column_data.max() * 1e6  # µA
+    overshoot = overshoot_peak - settled_current
+    OS_percent = (overshoot / settled_current * 100) if settled_current != 0 else 0
+
+
+
 
     # --- Pulse Width (in µs) ---
     pulse_durations = []
@@ -127,35 +158,25 @@ def calculate_parameters(data):
     current_rms = np.sqrt(np.mean(column_data**2)) * 1e6  # µA
     
     # --- Settling Time ---
-    settling_times = []
-    i = 1
-    while i < len(column_data) - 2:
-        if column_data.iloc[i] > column_data.iloc[i - 1] and column_data.iloc[i] >= column_data.iloc[i + 1]:
-            pulse_start_index = i
-            T1 = None
-            T2 = None
+    settling_time_us = 0
+    settling_window = 10  # number of samples to average for stability
+    tolerance_percent = 0.02  # 2% band for settling
 
-            pulse_derivative = np.diff(column_data.iloc[pulse_start_index:].values)
-            sign_changes = np.diff(np.sign(pulse_derivative))
+    if pulse_end_index is not None and pulse_end_index + 100 < len(column_data):
+        settled_region = column_data.iloc[pulse_end_index + 50 : pulse_end_index + 100]
+        settled_value = settled_region.mean()
 
-            for j in range(1, len(sign_changes)):
-                if sign_changes[j] != 0:
-                    idx = pulse_start_index + j + 1 
-                    current_time = time_data.iloc[idx]
-                    if T1 is None:
-                        T1 = current_time
-                    T2 = current_time 
+        # Define the band within which the signal is considered "settled"
+        upper_bound = settled_value * (1 + tolerance_percent)
+        lower_bound = settled_value * (1 - tolerance_percent)
 
-                if j > 10 and np.all(sign_changes[j-5:j] == 0):
-                    break
+        # Search for the earliest point after the pulse where the signal stays within bounds
+        for i in range(pulse_end_index + 50, len(column_data) - settling_window):
+            window = column_data.iloc[i:i + settling_window]
+            if window.between(lower_bound, upper_bound).all():
+                settling_time_us = abs((time_data.iloc[i] - pulse_start_time) * 1e6)  # in µs
+                break
 
-            if T1 is not None and T2 is not None:
-                settling_times.append((T2 - T1) * 1e6)  # µs
-            i += 20 
-        else:
-            i += 1
-
-    average_settling_time_us = np.mean(settling_times) if settling_times else 0
 
 
     # --- Return results ---
@@ -165,7 +186,7 @@ def calculate_parameters(data):
         "Overshoot": f"{overshoot:.4f} µA ({OS_percent:.2f} %)",
         "Pulse Width": f"{pulse_width:.4f} µs",
         "Current RMS": f"{current_rms:.4f} µA",
-        "Settling Time": f"{average_settling_time_us:.4f} µs"
+        "Settling Time": f"{settling_time_us:.4f} µs"
     }
 
 
