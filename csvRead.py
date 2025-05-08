@@ -138,30 +138,32 @@ def calculate_parameters(data):
 
 
     # --- Pulse Width (in µs) ---
-    pulse_durations = []
-    in_pulse = False
-    pulse_start_time = None
+    peak_current = column_data.max()
+    threshold = 0.5 * peak_current
 
-    for i in range(1, len(column_data) - 1):
-        prev = column_data.iloc[i - 1]
-        curr = column_data.iloc[i]
-        next_val = column_data.iloc[i + 1]
-        current_time = time_data.iloc[i]
+    # Convert to numpy for faster indexing
+    current_array = column_data.to_numpy()
+    time_array = time_data.to_numpy()
 
-        # Detect rising edge start
-        if not in_pulse and curr > prev and curr >= next_val:
-            in_pulse = True
-            pulse_start_time = current_time
+    # Find rising edge
+    rising_index = None
+    for i in range(1, len(current_array)):
+        if current_array[i - 1] < threshold <= current_array[i]:
+            rising_index = i
+            break
 
-        # Detect falling edge end
-        elif in_pulse and curr < prev and curr <= next_val:
-            in_pulse = False
-            pulse_end_time = current_time
-            duration_us = (pulse_end_time - pulse_start_time) * 1e7
-            if duration_us > 0:
-                pulse_durations.append(duration_us)
+    # Find falling edge
+    falling_index = None
+    if rising_index is not None:
+        for i in range(rising_index + 1, len(current_array)):
+            if current_array[i - 1] >= threshold > current_array[i]:
+                falling_index = i
+                break
 
-    pulse_width = np.mean(pulse_durations) if pulse_durations else 0
+    # Pulse Width in µs
+    pulse_width = 0
+    if rising_index is not None and falling_index is not None:
+        pulse_width = (time_array[falling_index] - time_array[rising_index]) * 1e6
 
 
 
@@ -171,18 +173,17 @@ def calculate_parameters(data):
     # --- Settling Time ---
     settling_time_us = 0
     settling_window = 10  # number of samples to average for stability
-    tolerance_percent = 0.02  # 2% band for settling
+    tolerance_percent = 0.05
 
-    if pulse_end_index is not None and pulse_end_index + 100 < len(column_data):
-        settled_region = column_data.iloc[pulse_end_index + 50 : pulse_end_index + 100]
-        settled_value = settled_region.mean()
+    if pulse_end_index is not None and pulse_end_index + 10 < len(column_data):
+        settled_region = column_data.iloc[pulse_end_index + 5 : pulse_end_index + 10]
 
         # Define the band within which the signal is considered "settled"
-        upper_bound = settled_value * (1 + tolerance_percent)
-        lower_bound = settled_value * (1 - tolerance_percent)
+        upper_bound = average_max_current * (1 + tolerance_percent)
+        lower_bound = average_max_current * (1 - tolerance_percent)
 
         # Search for the earliest point after the pulse where the signal stays within bounds
-        for i in range(pulse_end_index + 50, len(column_data) - settling_window):
+        for i in range(pulse_end_index + 5, len(column_data) - settling_window):
             window = column_data.iloc[i:i + settling_window]
             if window.between(lower_bound, upper_bound).all():
                 settling_time_us = abs((time_data.iloc[i] - pulse_start_time) * 1e6)  # in µs
