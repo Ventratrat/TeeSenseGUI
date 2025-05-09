@@ -172,23 +172,26 @@ def calculate_parameters(data):
     
     # --- Settling Time ---
     settling_time_us = 0
-    settling_window = 10  # number of samples to average for stability
-    tolerance_percent = 0.05
+    settling_window = 5  # number of samples to average for stability
+    tolerance_percent = 0.02
 
-    if pulse_end_index is not None and pulse_end_index + 10 < len(column_data):
-        settled_region = column_data.iloc[pulse_end_index + 5 : pulse_end_index + 10]
+    # Define the band within which the signal is considered "settled"
+    settled_target = settled_current / 1e6 
+    print(settled_target)
+    upper_bound = settled_target * (1 + tolerance_percent)
+    lower_bound = settled_target * (1 - tolerance_percent)
 
-        # Define the band within which the signal is considered "settled"
-        upper_bound = average_max_current * (1 + tolerance_percent)
-        lower_bound = average_max_current * (1 - tolerance_percent)
+    # Use rising_index as pulse start and falling_index as pulse end
+    if rising_index is not None and falling_index is not None:
+        pulse_start_time = time_array[rising_index]
+        pulse_start_index = rising_index
 
-        # Search for the earliest point after the pulse where the signal stays within bounds
-        for i in range(pulse_end_index + 5, len(column_data) - settling_window):
-            window = column_data.iloc[i:i + settling_window]
+        for i in range(pulse_start_index, len(column_data) - settling_window):
+            window = column_data.iloc[i : i + settling_window]
             if window.between(lower_bound, upper_bound).all():
-                settling_time_us = abs((time_data.iloc[i] - pulse_start_time) * 1e6)  # in µs
+                T2_time = time_data.iloc[i]
+                settling_time_us = abs((T2_time - pulse_start_time) * 1e6)  # Convert to µs
                 break
-
 
 
     # --- Return results ---
