@@ -85,12 +85,23 @@ class Ui_MainWindow(object):
 
         # ======= Menu Bar =======
         self.menubar = QtWidgets.QMenuBar(MainWindow)
+
+        # File menu
         self.menuFile = QtWidgets.QMenu(self.menubar)
         self.actionOpen = QtWidgets.QAction("Open")
         self.actionSave = QtWidgets.QAction("Save")
         self.menuFile.addAction(self.actionOpen)
         self.menuFile.addAction(self.actionSave)
         self.menubar.addMenu(self.menuFile)
+
+        # Analysis menu
+        self.menuAnalysis = QtWidgets.QMenu(self.menubar)
+        self.actionFilteringWindow = QtWidgets.QAction("Filtering Window")
+        self.actionDCBias = QtWidgets.QAction("DC Bias")
+        self.menuAnalysis.addAction(self.actionFilteringWindow)
+        self.menuAnalysis.addAction(self.actionDCBias)
+        self.menubar.addMenu(self.menuAnalysis)
+
         MainWindow.setMenuBar(self.menubar)
 
         self.statusbar = QtWidgets.QStatusBar(MainWindow)
@@ -99,6 +110,8 @@ class Ui_MainWindow(object):
         # Connections
         self.actionOpen.triggered.connect(self.handle_open_action)
         self.actionSave.triggered.connect(self.save_file)
+        self.actionFilteringWindow.triggered.connect(self.handle_filtering_window)
+        self.actionDCBias.triggered.connect(self.handle_dc_bias)
 
         # Internal state
         self.current_file_path = None
@@ -147,9 +160,12 @@ class Ui_MainWindow(object):
         _translate = QtCore.QCoreApplication.translate
         MainWindow.setWindowTitle(_translate("MainWindow", "TeeSense Current Pulse Display"))
         self.menuFile.setTitle(_translate("MainWindow", "&File"))
+        self.menuAnalysis.setTitle(_translate("MainWindow", "&Analysis"))
         self.actionOpen.setText(_translate("MainWindow", "Open"))
         self.actionSave.setText(_translate("MainWindow", "Save"))
-            
+        self.actionFilteringWindow.setText(_translate("MainWindow", "Filtering Window"))
+        self.actionDCBias.setText(_translate("MainWindow", "DC Bias"))
+
     def display_matplotlib_graph(self, figure):
         """Displays the matplotlib graph with scaling, ticks, and axis limits."""
         self.figure.clear()
@@ -226,6 +242,34 @@ class Ui_MainWindow(object):
                 self.open_excel_file(file_path)
             else:
                 QMessageBox.warning(None, "Error", "Unsupported file type.")
+
+    def handle_filtering_window(self):
+        QMessageBox.information(None, "Filtering Window", "Filtering window analysis not implemented yet.")
+
+    def handle_dc_bias(self):
+        try:
+            ax = self.figure.axes[0]
+            all_y_values = []
+
+            # Collect all y-data from lines
+            for line in ax.lines:
+                y_data = line.get_ydata()
+                all_y_values.extend(y_data)
+
+            if not all_y_values:
+                QMessageBox.warning(None, "DC Bias", "No data found to calculate DC bias.")
+                return
+
+            dc_bias = sum(all_y_values) / len(all_y_values)
+
+            # Add horizontal line to the plot
+            ax.axhline(dc_bias, color='g', linestyle='--', linewidth=1.5, label=f"DC Bias")
+            ax.legend()
+            self.canvas.draw()
+
+        except Exception as e:
+            QMessageBox.warning(None, "DC Bias Error", f"Error calculating DC bias:\n{e}")
+
 
 
 if __name__ == "__main__":
