@@ -23,9 +23,8 @@ def generate_plot(csv_file):
     if len(x) == 0 or len(y) == 0:
         raise ValueError("No valid data found in the CSV file.")
 
-    # --- Correcting for negative offset --- 
-    negative_offset = np.mean([val for val in y if val < 0]) if any(val < 0 for val in y) else 0
-    y = [val - negative_offset for val in y] 
+    baseline_offset = np.percentile(y, 5)  # Estimate baseline using the 5th percentile
+    y = [val - baseline_offset for val in y]
 
     x_min, x_max = min(x), max(x)
     y_min, y_max = min(y), max(y)
@@ -87,8 +86,8 @@ def calculate_parameters(data):
     time_data = numeric_cols.iloc[:, 0]  # time in seconds
     column_data = numeric_cols.iloc[:, 1]  # current
 
-    negative_offset = column_data[column_data < 0].mean() if column_data[column_data < 0].any() else 0
-    column_data = column_data - negative_offset  # Shift all data by the negative offset
+    baseline_offset = np.percentile(column_data, 5) 
+    column_data = column_data - baseline_offset
 
     # --- Max Current Analysis ---
     threshold = 0.7 * column_data.max()
