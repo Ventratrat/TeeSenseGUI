@@ -5,7 +5,7 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as Navigatio
 from matplotlib.figure import Figure
 from csvRead import generate_plot, populate_table
 import pandas as pd
-import json
+import numpy as np
 import sys
 
 
@@ -17,7 +17,7 @@ class Ui_MainWindow(object):
         self.centralwidget = QtWidgets.QWidget(MainWindow)
         self.main_layout = QtWidgets.QHBoxLayout(self.centralwidget)
 
-        # ======= Left side: Plot Frame =======
+        # ======= Plot Frame =======
         self.plotFrame = QFrame(self.centralwidget)
         self.plotLayout = QVBoxLayout(self.plotFrame)
         self.figure = Figure()
@@ -27,7 +27,7 @@ class Ui_MainWindow(object):
         self.plotLayout.addWidget(self.canvas)
         self.main_layout.addWidget(self.plotFrame, 2)
 
-        # ======= Right side: Table and Controls =======
+        # ======= Table and Controls =======
         self.rightLayout = QtWidgets.QVBoxLayout()
 
         # Table widget
@@ -89,9 +89,7 @@ class Ui_MainWindow(object):
         # File menu
         self.menuFile = QtWidgets.QMenu(self.menubar)
         self.actionOpen = QtWidgets.QAction("Open")
-        self.actionSave = QtWidgets.QAction("Save")
         self.menuFile.addAction(self.actionOpen)
-        self.menuFile.addAction(self.actionSave)
         self.menubar.addMenu(self.menuFile)
 
         # Analysis menu
@@ -109,7 +107,6 @@ class Ui_MainWindow(object):
 
         # Connections
         self.actionOpen.triggered.connect(self.handle_open_action)
-        self.actionSave.triggered.connect(self.save_file)
         self.actionFilteringWindow.triggered.connect(self.handle_filtering_window)
         self.actionDCBias.triggered.connect(self.handle_dc_bias)
 
@@ -162,7 +159,6 @@ class Ui_MainWindow(object):
         self.menuFile.setTitle(_translate("MainWindow", "&File"))
         self.menuAnalysis.setTitle(_translate("MainWindow", "&Analysis"))
         self.actionOpen.setText(_translate("MainWindow", "Open"))
-        self.actionSave.setText(_translate("MainWindow", "Save"))
         self.actionFilteringWindow.setText(_translate("MainWindow", "Filtering Window"))
         self.actionDCBias.setText(_translate("MainWindow", "DC Bias"))
 
@@ -186,13 +182,11 @@ class Ui_MainWindow(object):
         ax.grid(True)
         ax.legend()
 
-        # Apply user-defined limits
         if self.x_min is not None and self.x_max is not None:
             ax.set_xlim(self.x_min, self.x_max)
         if self.y_min is not None and self.y_max is not None:
             ax.set_ylim(self.y_min, self.y_max)
 
-        # Apply ticks
         if self.x_div:
             min_x, max_x = ax.get_xlim()
             ax.set_xticks([min_x + i * self.x_div for i in range(int((max_x - min_x) / self.x_div) + 1)])
@@ -213,27 +207,6 @@ class Ui_MainWindow(object):
         except Exception as e:
             QMessageBox.warning(None, "Error", f"Could not load CSV file:\n{e}")
 
-    def save_file(self):
-        if self.current_file_path:
-            self.save_workspace(self.current_file_path)
-        else:
-            file_path, _ = QFileDialog.getSaveFileName(None, "Save Workspace As", "", "JSON Files (*.json)")
-            if file_path:
-                self.current_file_path = file_path
-                self.save_workspace(file_path)
-
-    def save_workspace(self, file_path):
-        workspace_data = {
-            "current_file_path": self.current_file_path,
-            "is_unsaved": self.is_unsaved,
-        }
-        try:
-            with open(file_path, 'w') as json_file:
-                json.dump(workspace_data, json_file, indent=4)
-            QMessageBox.information(None, "Save Successful", "Workspace saved successfully.")
-        except Exception as e:
-            QMessageBox.warning(None, "Save Failed", f"Could not save workspace:\n{e}")
-
     def handle_open_action(self):
         file_path, _ = QFileDialog.getOpenFileName(None, "Open File", "", "CSV Files (*.csv);;JSON Files (*.json)")
         if file_path:
@@ -243,15 +216,48 @@ class Ui_MainWindow(object):
             else:
                 QMessageBox.warning(None, "Error", "Unsupported file type.")
 
+    def moving_average(self, data, window_size=3):
+        if window_size < 1:
+            return data
+        padded = np.pad(data, (window_size//2, window_size-1-window_size//2), mode='edge')
+        return np.convolve(padded, np.ones(window_size)/window_size, mode='valid').tolist()
+
+
     def handle_filtering_window(self):
-        QMessageBox.information(None, "Filtering Window", "Filtering window analysis not implemented yet.")
+        if not self.figure.axes:
+            QMessageBox.warning(None, "Filtering Error", "No data to filter.")
+            return
+
+        window_size, ok = QtWidgets.QInputDialog.getInt(None, "Moving Average Filter", "Enter window size:", min=1, value=3)
+        if not ok:
+            return
+
+        ax = self.figure.axes[0]
+        filtered_figure = Figure()
+        new_ax = filtered_figure.add_subplot(111)
+
+        for line in ax.lines:
+            x_data = line.get_xdata()
+            y_data = line.get_ydata()
+            filtered_y = self.moving_average(y_data, window_size)
+
+            # Keep x_data same length as y_data
+            if len(filtered_y) != len(x_data):
+                delta = len(x_data) - len(filtered_y)
+                if delta > 0:
+                    x_data = x_data[delta//2 : -((delta+1)//2)]
+                elif delta < 0:
+                    filtered_y = filtered_y[:len(x_data)]
+
+            new_ax.plot(x_data, filtered_y, label=f"{line.get_label()}", linestyle='-', marker='')
+
+        self.display_matplotlib_graph(filtered_figure)
 
     def handle_dc_bias(self):
         try:
             ax = self.figure.axes[0]
             all_y_values = []
 
-            # Collect all y-data from lines
             for line in ax.lines:
                 y_data = line.get_ydata()
                 all_y_values.extend(y_data)
@@ -262,7 +268,6 @@ class Ui_MainWindow(object):
 
             dc_bias = sum(all_y_values) / len(all_y_values)
 
-            # Add horizontal line to the plot
             ax.axhline(dc_bias, color='g', linestyle='--', linewidth=1.5, label=f"DC Bias")
             ax.legend()
             self.canvas.draw()
