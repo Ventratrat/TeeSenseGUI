@@ -1,8 +1,10 @@
 from PyQt5 import QtCore, QtWidgets
-from PyQt5.QtWidgets import QFileDialog, QMessageBox, QVBoxLayout, QFrame, QComboBox, QLineEdit, QGroupBox, QPushButton, QFormLayout
+from PyQt5.QtWidgets import QFileDialog, QMessageBox, QVBoxLayout, QFrame, QComboBox, QLineEdit, QGroupBox, QPushButton, QFormLayout, QLabel, QHBoxLayout, QWidget, QTableWidget
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
+from matplotlib.backend_bases import MouseEvent
+from matplotlib.ticker import MultipleLocator
 from csvRead import generate_plot, populate_table
 import pandas as pd
 import numpy as np
@@ -25,13 +27,53 @@ class Ui_MainWindow(object):
         self.toolbar = NavigationToolbar(self.canvas, self.plotFrame)
         self.plotLayout.addWidget(self.toolbar)
         self.plotLayout.addWidget(self.canvas)
+
+        # Add marker controls
+        self.markerPanel = QWidget()
+        self.markerControls = QHBoxLayout(self.markerPanel)
+        self.enable_markers_btn = QPushButton("Placement: OFF")
+        self.toggle_marker_orientation_btn = QPushButton("Vertical Marker")
+        self.clear_markers_btn = QPushButton("Clear Markers")
+        self.marker_info_label = QLabel("")
+
+        self.markerControls.addWidget(self.enable_markers_btn)
+        self.markerControls.addWidget(self.toggle_marker_orientation_btn)
+        self.markerControls.addWidget(self.clear_markers_btn)
+        self.markerControls.addWidget(self.marker_info_label)
+        self.markerControls.addStretch()
+        self.markerPanel.setFixedWidth(500)
+
+        self.marker_enabled = False
+        self.marker_orientation = 'vline'
+
+        def toggle_placement():
+            self.marker_enabled = not self.marker_enabled
+            self.enable_markers_btn.setText(f"Placement: {'ON' if self.marker_enabled else 'OFF'}")
+
+        def toggle_orientation():
+            if self.marker_orientation == 'vline':
+                self.marker_orientation = 'hline'
+                self.toggle_marker_orientation_btn.setText("Horizontal Marker")
+            else:
+                self.marker_orientation = 'vline'
+                self.toggle_marker_orientation_btn.setText("Vertical Marker")
+
+        self.enable_markers_btn.clicked.connect(toggle_placement)
+        self.toggle_marker_orientation_btn.clicked.connect(toggle_orientation)
+
+        self.marker_manager = MarkerManager(self.canvas, self.figure.gca())
+        self.clear_markers_btn.clicked.connect(lambda: self.marker_manager.clear_all_markers())
+        self.marker_manager.set_mode_callback(lambda: self.marker_enabled)
+        self.marker_manager.set_orientation_callback(lambda: self.marker_orientation)
+        self.marker_manager.set_info_callback(lambda text: self.marker_info_label.setText(text))
+
+        self.plotLayout.addWidget(self.markerPanel)
         self.main_layout.addWidget(self.plotFrame, 2)
 
         # ======= Table and Controls =======
         self.rightLayout = QtWidgets.QVBoxLayout()
 
-        # Table widget
-        self.tableWidget = QtWidgets.QTableWidget(self.centralwidget)
+        self.tableWidget = QTableWidget(self.centralwidget)
         self.tableWidget.setColumnCount(2)
         self.tableWidget.setHorizontalHeaderLabels(["Parameter", "Analysis"])
         self.tableWidget.horizontalHeader().setStretchLastSection(True)
@@ -41,34 +83,27 @@ class Ui_MainWindow(object):
         self.controlGroup = QGroupBox("Graph Controls")
         self.controlLayout = QFormLayout(self.controlGroup)
 
-        # Unit selectors
         self.unit_selector_y = QComboBox()
         self.unit_selector_y.addItems(["uA", "mA", "A"])
 
         self.unit_selector_x = QComboBox()
         self.unit_selector_x.addItems(["us", "ms", "s"])
 
-        # Units per division
-        self.input_x_div = QLineEdit()
-        self.input_x_div.setPlaceholderText("e.g. 100")
+        self.input_x_div = QLineEdit(); self.input_x_div.setPlaceholderText("e.g. 100")
+        self.input_y_div = QLineEdit(); self.input_y_div.setPlaceholderText("e.g. 50")
 
-        self.input_y_div = QLineEdit()
-        self.input_y_div.setPlaceholderText("e.g. 50")
-
-        # Axis limits
-        self.input_x_min = QLineEdit()
-        self.input_x_max = QLineEdit()
-        self.input_y_min = QLineEdit()
-        self.input_y_max = QLineEdit()
+        self.input_x_min = QLineEdit(); self.input_x_max = QLineEdit()
+        self.input_y_min = QLineEdit(); self.input_y_max = QLineEdit()
 
         for line in [self.input_x_min, self.input_x_max, self.input_y_min, self.input_y_max]:
             line.setPlaceholderText("Optional")
 
-        # Apply button
+        self.trigger_threshold = QLineEdit()
+        self.trigger_threshold.setPlaceholderText("e.g. 0.01 A")
+
         self.apply_btn = QPushButton("Apply")
         self.apply_btn.clicked.connect(self.apply_axis_settings)
 
-        # Add controls to layout
         self.controlLayout.addRow("Y-axis unit:", self.unit_selector_y)
         self.controlLayout.addRow("X-axis unit:", self.unit_selector_x)
         self.controlLayout.addRow("X units/div:", self.input_x_div)
@@ -77,6 +112,7 @@ class Ui_MainWindow(object):
         self.controlLayout.addRow("X max:", self.input_x_max)
         self.controlLayout.addRow("Y min:", self.input_y_min)
         self.controlLayout.addRow("Y max:", self.input_y_max)
+        self.controlLayout.addRow("Trigger Threshold:", self.trigger_threshold)
         self.controlLayout.addRow(self.apply_btn)
 
         self.rightLayout.addWidget(self.controlGroup)
@@ -85,14 +121,11 @@ class Ui_MainWindow(object):
 
         # ======= Menu Bar =======
         self.menubar = QtWidgets.QMenuBar(MainWindow)
-
-        # File menu
         self.menuFile = QtWidgets.QMenu(self.menubar)
         self.actionOpen = QtWidgets.QAction("Open")
         self.menuFile.addAction(self.actionOpen)
         self.menubar.addMenu(self.menuFile)
 
-        # Analysis menu
         self.menuAnalysis = QtWidgets.QMenu(self.menubar)
         self.actionFilteringWindow = QtWidgets.QAction("Filtering Window")
         self.actionDCBias = QtWidgets.QAction("DC Bias")
@@ -105,12 +138,10 @@ class Ui_MainWindow(object):
         self.statusbar = QtWidgets.QStatusBar(MainWindow)
         MainWindow.setStatusBar(self.statusbar)
 
-        # Connections
         self.actionOpen.triggered.connect(self.handle_open_action)
         self.actionFilteringWindow.triggered.connect(self.handle_filtering_window)
         self.actionDCBias.triggered.connect(self.handle_dc_bias)
 
-        # Internal state
         self.current_file_path = None
         self.is_unsaved = False
         self.y_unit = "A"
@@ -123,12 +154,12 @@ class Ui_MainWindow(object):
         self.x_max = None
         self.y_min = None
         self.y_max = None
+        self.reference_trigger_time = None
 
         self.retranslateUi(MainWindow)
         QtCore.QMetaObject.connectSlotsByName(MainWindow)
 
     def apply_axis_settings(self):
-        """Applies all user-defined settings."""
         self.y_unit = self.unit_selector_y.currentText()
         self.x_unit = self.unit_selector_x.currentText()
 
@@ -197,15 +228,24 @@ class Ui_MainWindow(object):
         self.canvas.draw()
 
     def open_excel_file(self, file_path):
-        """Loads CSV and plots it."""
         try:
             data = pd.read_csv(file_path)
             populate_table(self.tableWidget, data)
             figure = generate_plot(file_path)
             self.display_matplotlib_graph(figure)
+
+            # --- rebind markers to new plot ---
+            new_ax = self.figure.axes[0]
+            self.marker_manager.ax = new_ax
+            self.marker_manager.markers.clear()
+            self.marker_manager.marker_counter = 1
+            if hasattr(self.marker_manager, 'info_output'):
+                self.marker_manager.info_output("")
+
             self.is_unsaved = True
         except Exception as e:
             QMessageBox.warning(None, "Error", f"Could not load CSV file:\n{e}")
+
 
     def handle_open_action(self):
         file_path, _ = QFileDialog.getOpenFileName(None, "Open File", "", "CSV Files (*.csv);;JSON Files (*.json)")
@@ -270,6 +310,7 @@ class Ui_MainWindow(object):
             # Calculate average (DC bias level)
             dc_bias_value = sum(all_y_values) / len(all_y_values)
 
+
             ax.clear()
             for line in self.figure.axes[0].lines:
                 ax.plot(line.get_xdata(), line.get_ydata(), label=line.get_label(), linestyle='--', alpha=0.4)
@@ -286,7 +327,125 @@ class Ui_MainWindow(object):
         except Exception as e:
             QMessageBox.warning(None, "DC Bias Error", f"Error applying DC bias mode:\n{e}")
 
+class MarkerManager:
+    def __init__(self, canvas, ax):
+        self.marker_counter = 1
+        self.canvas = canvas
+        self.ax = ax
+        self.markers = []
+        self.active_marker = None
+        self.cid_click = self.canvas.mpl_connect('button_press_event', self.on_click)
+        self.cid_release = self.canvas.mpl_connect('button_release_event', self.on_release)
+        self.cid_motion = self.canvas.mpl_connect('motion_notify_event', self.on_motion)
+        self.cid_pick = self.canvas.mpl_connect('pick_event', self.on_pick)
 
+    def clear_all_markers(self):
+        for marker in self.markers:
+            marker.remove()
+        self.markers.clear()
+        self.marker_counter = 1
+        if hasattr(self, 'info_output'):
+            self.info_output("")  # clear label
+        self.canvas.draw_idle()
+
+    def set_mode_callback(self, fn):
+        self.enable_check = fn
+
+    def set_orientation_callback(self, fn):
+        self.orientation_check = fn
+
+    def set_info_callback(self, fn):
+        self.info_output = fn
+
+    def on_click(self, event):
+        if not event.inaxes or not self.enable_check():
+            return
+
+        if event.button == 1:
+            orientation = self.orientation_check()
+            
+            if orientation == 'vline':
+                position = event.xdata 
+            else:
+                position = event.ydata 
+            marker_label = f"M{self.marker_counter}"
+            
+            marker = InteractiveMarker(self.ax, orientation, position, label=marker_label)
+            self.marker_counter += 1
+            self.markers.append(marker)
+            
+            if hasattr(self, 'info_output'):
+                text_lines = []
+                for m in self.markers:
+                    x_label = self.ax.get_xlabel() if self.ax.get_xlabel() else "Time"
+                    y_label = self.ax.get_ylabel() if self.ax.get_ylabel() else "Current"
+                    
+                    unit = x_label.split()[-1] if m.orientation == 'vline' else y_label.split()[-1]
+                    text_lines.append(f"{m.label}: {m.position:.4f} {unit}")
+
+                self.info_output("\n".join(text_lines))
+
+            self.canvas.draw_idle()
+
+        elif event.button == 3:
+            for marker in self.markers:
+                if marker.line.contains(event)[0]:
+                    marker.remove()  
+                    self.markers.remove(marker)
+                    self.canvas.draw_idle() 
+                    break
+
+
+
+    def on_pick(self, event):
+        for marker in self.markers:
+            if marker.line == event.artist:
+                marker.dragging = True
+                self.active_marker = marker
+                break
+
+    def on_release(self, event):
+        if self.active_marker:
+            self.active_marker.dragging = False
+            self.active_marker = None
+
+    def on_motion(self, event):
+        if self.active_marker and event.inaxes:
+            new_pos = event.xdata if self.active_marker.orientation == 'vline' else event.ydata
+            self.active_marker.update_position(new_pos)
+            self.canvas.draw_idle()
+
+            # ✅ Update the label live
+            if hasattr(self, 'info_output'):
+                text_lines = []
+                for m in self.markers:
+                    unit = self.ax.get_xlabel().split()[-1] if m.orientation == 'vline' else self.ax.get_ylabel().split()[-1]
+                    text_lines.append(f"{m.label}: {m.position:.4f} {unit}")
+                self.info_output("\n".join(text_lines))
+
+
+class InteractiveMarker:
+    def __init__(self, ax, orientation, position, label):
+        self.ax = ax
+        self.orientation = orientation  # 'vline' or 'hline'
+        self.position = position
+        self.label = label
+        self.dragging = False
+
+        if self.orientation == 'vline':
+            self.line = ax.axvline(x=position, color='r', linestyle='--', label=self.label, picker=5)
+        else:
+            self.line = ax.axhline(y=position, color='b', linestyle='--', label=self.label, picker=5)
+
+    def update_position(self, new_pos):
+        self.position = new_pos
+        if self.orientation == 'vline':
+            self.line.set_xdata([new_pos, new_pos])
+        else:
+            self.line.set_ydata([new_pos, new_pos])
+
+    def remove(self):
+        self.line.remove()
 
 
 if __name__ == "__main__":
