@@ -179,7 +179,6 @@ def calculate_parameters(data):
 
     # Define the band within which the signal is considered "settled"
     settled_target = settled_current / 1e6 
-    print(settled_target)
     upper_bound = settled_target * (1 + tolerance_percent)
     lower_bound = settled_target * (1 - tolerance_percent)
 
