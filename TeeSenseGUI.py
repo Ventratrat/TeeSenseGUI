@@ -256,6 +256,7 @@ class Ui_MainWindow(object):
     def handle_dc_bias(self):
         try:
             ax = self.figure.axes[0]
+
             all_y_values = []
 
             for line in ax.lines:
@@ -263,17 +264,28 @@ class Ui_MainWindow(object):
                 all_y_values.extend(y_data)
 
             if not all_y_values:
-                QMessageBox.warning(None, "DC Bias", "No data found to calculate DC bias.")
+                QMessageBox.warning(None, "DC Bias", "No data available to display DC bias.")
                 return
 
-            dc_bias = sum(all_y_values) / len(all_y_values)
+            # Calculate average (DC bias level)
+            dc_bias_value = sum(all_y_values) / len(all_y_values)
 
-            ax.axhline(dc_bias, color='g', linestyle='--', linewidth=1.5, label=f"DC Bias")
+            ax.clear()
+            for line in self.figure.axes[0].lines:
+                ax.plot(line.get_xdata(), line.get_ydata(), label=line.get_label(), linestyle='--', alpha=0.4)
+
+            # Plot a horizontal line at the DC level
+            ax.axhline(dc_bias_value, color='g', linestyle='--', linewidth=2, label=f"DC Bias: {dc_bias_value:.2f} {self.y_unit}")
+            ax.set_title("DC Bias Display Mode")
+            ax.set_xlabel(f"Time ({self.x_unit})")
+            ax.set_ylabel(f"Current ({self.y_unit})")
+            ax.grid()
             ax.legend()
             self.canvas.draw()
 
         except Exception as e:
-            QMessageBox.warning(None, "DC Bias Error", f"Error calculating DC bias:\n{e}")
+            QMessageBox.warning(None, "DC Bias Error", f"Error applying DC bias mode:\n{e}")
+
 
 
 
