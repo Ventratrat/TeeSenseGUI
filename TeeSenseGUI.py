@@ -3,8 +3,8 @@ from PyQt5.QtWidgets import QFileDialog, QMessageBox, QVBoxLayout, QFrame, QComb
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
-from matplotlib.backend_bases import MouseEvent
 from matplotlib.ticker import MultipleLocator
+import matplotlib.pyplot as plt
 from csvRead import generate_plot, populate_table
 import pandas as pd
 import numpy as np
@@ -123,7 +123,9 @@ class Ui_MainWindow(object):
         self.menubar = QtWidgets.QMenuBar(MainWindow)
         self.menuFile = QtWidgets.QMenu(self.menubar)
         self.actionOpen = QtWidgets.QAction("Open")
+        self.actionExportCSV = QtWidgets.QAction("Export Data as CSV")
         self.menuFile.addAction(self.actionOpen)
+        self.menuFile.addAction(self.actionExportCSV)
         self.menubar.addMenu(self.menuFile)
 
         self.menuAnalysis = QtWidgets.QMenu(self.menubar)
@@ -139,6 +141,7 @@ class Ui_MainWindow(object):
         MainWindow.setStatusBar(self.statusbar)
 
         self.actionOpen.triggered.connect(self.handle_open_action)
+        self.actionExportCSV.triggered.connect(self.export_csv)
         self.actionFilteringWindow.triggered.connect(self.handle_filtering_window)
         self.actionDCBias.triggered.connect(self.handle_dc_bias)
 
@@ -181,6 +184,10 @@ class Ui_MainWindow(object):
         try: self.y_max = float(self.input_y_max.text())
         except: self.y_max = None
 
+        self.locked_xlim = None
+        self.locked_ylim = None
+        self.reference_trigger_time = None
+
         if self.current_file_path and self.current_file_path.endswith('.csv'):
             self.open_excel_file(self.current_file_path)
 
@@ -190,6 +197,7 @@ class Ui_MainWindow(object):
         self.menuFile.setTitle(_translate("MainWindow", "&File"))
         self.menuAnalysis.setTitle(_translate("MainWindow", "&Analysis"))
         self.actionOpen.setText(_translate("MainWindow", "Open"))
+        self.actionExportCSV.setText(_translate("MainWindow", "Export Data as CSV"))
         self.actionFilteringWindow.setText(_translate("MainWindow", "Filtering Window"))
         self.actionDCBias.setText(_translate("MainWindow", "DC Bias"))
 
@@ -233,6 +241,29 @@ class Ui_MainWindow(object):
             populate_table(self.tableWidget, data)
             figure = generate_plot(file_path)
             self.display_matplotlib_graph(figure)
+            raw_x, raw_y = generate_plot(file_path, return_raw=True)
+            try:
+                threshold = float(self.trigger_threshold.text())
+            except:
+                threshold = None
+
+            
+            trigger_index = 0
+            if threshold is not None:
+                for i in range(1, len(raw_y)):
+                    if raw_y[i - 1] < threshold <= raw_y[i]:
+                        trigger_index = i
+                        break
+
+            trigger_time = raw_x[trigger_index]
+
+            
+            if self.reference_trigger_time is None:
+                self.reference_trigger_time = 0
+
+            
+            aligned_x = [x - trigger_time for x in raw_x]
+            self.display_raw_data(aligned_x, raw_y)
 
             # --- rebind markers to new plot ---
             new_ax = self.figure.axes[0]
@@ -246,6 +277,91 @@ class Ui_MainWindow(object):
         except Exception as e:
             QMessageBox.warning(None, "Error", f"Could not load CSV file:\n{e}")
 
+    def display_raw_data(self, x_data, y_data):
+        self.figure.clear()
+        ax = self.figure.add_subplot(111)
+        ax.set_title("Current Pulse Data")
+
+        self.last_x_data = x_data
+        self.last_y_data = y_data
+
+        x_scale = self.unit_scale_x.get(self.x_unit, 1)
+        y_scale = self.unit_scale_y.get(self.y_unit, 1)
+        x = [v * x_scale for v in x_data]
+        y = [v * y_scale for v in y_data]
+
+        ax.plot(x, y, label="Pulse", linestyle='-', marker='o')
+        ax.set_xlabel(f"Time ({self.x_unit})")
+        ax.set_ylabel(f"Current ({self.y_unit})")
+        ax.grid(True)
+        ax.legend()
+
+        # --- X Axis ---
+        final_x_min, final_x_max = self.compute_axis_limits(
+            x, self.x_min, self.x_max, self.x_div, "X", is_x_axis=True
+        )
+        ax.set_xlim(final_x_min, final_x_max)
+        self.locked_xlim = (final_x_min, final_x_max)
+
+        if self.x_div and (self.x_min is None or self.x_max is None):
+            min_x, max_x = ax.get_xlim()
+            start_tick = (min_x // self.x_div) * self.x_div
+            end_tick = (max_x // self.x_div + 20) * self.x_div  # extend beyond visible range
+
+            ticks = []
+            val = start_tick
+            while val <= end_tick:
+                ticks.append(val)
+                val += self.x_div
+            if self.x_div and (self.x_min is None or self.x_max is None):
+                ax.xaxis.set_major_locator(MultipleLocator(self.x_div))
+
+        # --- Y Axis ---
+        final_y_min, final_y_max = self.compute_axis_limits(
+            y, self.y_min, self.y_max, self.y_div, "Y", is_x_axis=False
+        )
+        ax.set_ylim(final_y_min, final_y_max)
+        self.locked_ylim = (final_y_min, final_y_max)
+
+        if self.y_div and (self.y_min is None or self.y_max is None):
+            min_y, max_y = ax.get_ylim()
+            start_tick = (min_y // self.y_div) * self.y_div
+            end_tick = (max_y // self.y_div + 20) * self.y_div  # extend above view
+
+            ticks = []
+            val = start_tick
+            while val <= end_tick:
+                ticks.append(val)
+                val += self.y_div
+            if self.y_div and (self.y_min is None or self.y_max is None):
+                ax.yaxis.set_major_locator(MultipleLocator(self.y_div))
+
+        self.canvas.draw()
+
+    def compute_axis_limits(self, data, min_val, max_val, units_per_div, label, is_x_axis=True):
+        NUM_DIVS = 10
+        data_min, data_max = min(data), max(data)
+        center = (data_min + data_max) / 2
+
+        if min_val is not None and max_val is not None:
+            axis_min = min_val
+            axis_max = max_val
+            reason = "manual min/max"
+        elif units_per_div is not None:
+            half_range = (units_per_div * NUM_DIVS) / 2
+            axis_min = center - half_range
+            axis_max = center + half_range
+            reason = f"{units_per_div} units/div"
+        else:
+            span = data_max - data_min
+            pad = span * 0.05
+            axis_min = data_min - pad
+            axis_max = data_max + pad
+            reason = "auto"
+
+        print(f"📊 Using {reason} for {label}: {axis_min} to {axis_max}")
+        return axis_min, axis_max
+
 
     def handle_open_action(self):
         file_path, _ = QFileDialog.getOpenFileName(None, "Open File", "", "CSV Files (*.csv);;JSON Files (*.json)")
@@ -255,6 +371,44 @@ class Ui_MainWindow(object):
                 self.open_excel_file(file_path)
             else:
                 QMessageBox.warning(None, "Error", "Unsupported file type.")
+
+    def export_csv(self):
+
+        # Get the figure and axis from the plot (assuming it's the first axis in the figure)
+        figure = plt.gcf()  # Get current figure
+        ax = figure.gca()  # Get the current axis
+
+        # Check if the axis has any lines (plots) and get data from them
+        lines = ax.get_lines()
+        if not lines:
+            QMessageBox.warning(None, "No Data", "No data to export from the plot.")
+            return
+
+        # If there are multiple lines, you may want to export the data for each
+        # We'll assume you're interested in the data from the first line here
+        x_data, y_data = lines[0].get_data()
+
+        # Apply unit scaling if necessary
+        x_scale = self.unit_scale_x.get(self.x_unit, 1)
+        y_scale = self.unit_scale_y.get(self.y_unit, 1)
+
+        # Prompt the user to choose a file location to save the CSV
+        file_path, _ = QFileDialog.getSaveFileName(
+            None, "Save CSV", "", "CSV Files (*.csv)"
+        )
+        if not file_path:
+            return
+
+        try:
+            # Open the file and write data to it
+            with open(file_path, "w", newline="") as f:
+                f.write(f"Time ({self.x_unit}),Current ({self.y_unit})\n")  # CSV header
+                for x, y in zip(x_data, y_data):
+                    f.write(f"{x * x_scale},{y * y_scale}\n")
+            
+            QMessageBox.information(None, "Success", "CSV file saved successfully.")
+        except Exception as e:
+            QMessageBox.warning(None, "Error", f"Failed to save CSV:\n{e}")
 
     def moving_average(self, data, window_size=3):
         if window_size < 1:

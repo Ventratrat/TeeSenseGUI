@@ -4,7 +4,7 @@ import numpy as np
 from matplotlib.ticker import FuncFormatter
 from PyQt5 import QtWidgets
 
-def generate_plot(csv_file):
+def generate_plot(csv_file, return_raw=False):
     x = []
     y = []
 
@@ -57,6 +57,9 @@ def generate_plot(csv_file):
 
     ax.xaxis.set_major_formatter(FuncFormatter(scientific_formatter))
     ax.yaxis.set_major_formatter(FuncFormatter(scientific_formatter))
+
+    if return_raw:
+        return x, y
 
     return figure
 
