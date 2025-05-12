@@ -1,5 +1,5 @@
 from PyQt5 import QtCore, QtWidgets
-from PyQt5.QtWidgets import QFileDialog, QMessageBox, QVBoxLayout, QFrame, QComboBox, QLineEdit, QGroupBox, QPushButton, QFormLayout, QLabel, QHBoxLayout, QWidget, QTableWidget
+from PyQt5.QtWidgets import QFileDialog, QMessageBox, QVBoxLayout, QFrame, QComboBox, QLineEdit, QGroupBox, QPushButton, QFormLayout, QLabel, QHBoxLayout, QWidget, QTableWidget, QSpinBox
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
@@ -9,6 +9,11 @@ from csvRead import generate_plot, populate_table
 import pandas as pd
 import numpy as np
 import sys
+import serial
+import serial.tools.list_ports
+import traceback
+import time
+from dataCollect import *
 
 
 class Ui_MainWindow(object):
@@ -114,6 +119,15 @@ class Ui_MainWindow(object):
         self.controlLayout.addRow("Y max:", self.input_y_max)
         self.controlLayout.addRow("Trigger Threshold:", self.trigger_threshold)
         self.controlLayout.addRow(self.apply_btn)
+        
+        self.recollect_btn = QPushButton("Recollect Data")
+        self.recollect_btn.clicked.connect(self.recollect_data)
+        self.controlLayout.addRow(self.recollect_btn)
+        
+        self.sample_count_spin = QSpinBox()
+        self.sample_count_spin.setRange(10, 10000)  # Reasonable range
+        self.sample_count_spin.setValue(200)  # Default value
+        self.controlLayout.addRow("Sample Count:", self.sample_count_spin)
 
         self.rightLayout.addWidget(self.controlGroup)
         self.main_layout.addLayout(self.rightLayout, 1)
@@ -480,6 +494,103 @@ class Ui_MainWindow(object):
 
         except Exception as e:
             QMessageBox.warning(None, "DC Bias Error", f"Error applying DC bias mode:\n{e}")
+            
+    def recollect_data(self):
+        try:
+             # Get sample count from UI
+             sample_count = self.sample_count_spin.value()
+             print(f"Attempting to collect {sample_count} samples")
+
+             # Case 1: Use existing connection if available
+             if hasattr(self, 'ser') and self.ser and self.ser.is_open:
+                  print(f"Reusing existing connection to {self.serial_port}")
+
+            # Case 2: Try to auto-detect from dataCollect.py (if running)
+             elif 'ser' in globals() and hasattr(globals()['ser'], 'is_open') and globals()['ser'].is_open:
+                 self.serial_port = globals()['ser'].port
+                 self.ser = globals()['ser']
+                 print(f"User chosen connection : {self.serial_port}")
+        
+             # Case 3: Manual port selection
+             else:
+                ports = self.scan_serial_ports()
+                if not ports:
+                    raise ValueError("No serial ports detected")
+            
+                port, ok = QtWidgets.QInputDialog.getItem(
+                    None, "Select Port", "Available COM ports:", ports, 0, False
+                )
+                if not ok:
+                    return
+            
+                self.serial_port = port
+                self.ser = serial.Serial(port, 115200, timeout=1)
+                print(f"Manually connected to {port}")
+
+             # Verify connection
+             if not self.ser.is_open:
+                raise ValueError(f"Failed to connect to {self.serial_port}")
+        
+            # Initialize data collection
+             collected_data = []
+             start_time = time.time()
+        
+             # Collect data until we reach sample count
+             while len(collected_data) < sample_count:
+                if self.ser.in_waiting:
+                    line = self.ser.readline().decode('utf-8').strip()
+                    if line:  # Only process non-empty lines
+                        try:
+                            # Assuming data comes as comma-separated values (time, current)
+                             time_val, current_val = map(float, line.split(','))
+                             collected_data.append((time_val, current_val))
+                        
+                            # Update status every 10 samples
+                             if len(collected_data) % 10 == 0:
+                                self.statusbar.showMessage(
+                                     f"Collected {len(collected_data)}/{sample_count} samples", 
+                                     1000
+                                )
+                                QtWidgets.QApplication.processEvents()  # Keep UI responsive
+                            
+                        except ValueError as e:
+                             print(f"Error parsing line: {line} - {str(e)}")
+        
+             # Create DataFrame from collected data
+             df = pd.DataFrame(collected_data, columns=['Time', 'Current'])
+        
+             if df.empty:
+                raise ValueError("No valid data was collected")
+        
+             # Update UI
+             populate_table(self.tableWidget, df)
+             figure = generate_plot(dataframe=df)
+        
+             if hasattr(self, 'current_figure'):
+                 plt.close(self.current_figure)
+        
+             self.display_matplotlib_graph(figure)
+             self.current_figure = figure
+        
+             # Show completion message
+             elapsed = time.time() - start_time
+             msg = f"Collected {len(df)} samples in {elapsed:.2f} seconds"
+             self.statusbar.showMessage(msg, 5000)
+             QMessageBox.information(None, "Success", msg)
+
+        except ValueError as e:
+            QMessageBox.warning(None, "Data Error", str(e))
+        except Exception as e:
+            QMessageBox.critical(None, "Error", f"Failed to collect data:\n{str(e)}")
+            print(f"Error traceback:\n{traceback.format_exc()}")
+        finally:
+         # Don't close serial connection - keep it open for future use
+          pass
+      
+    def scan_serial_ports(self):
+        """Scan for available serial ports"""
+        ports = serial.tools.list_ports.comports()
+        return [port.device for port in ports]
 
 class MarkerManager:
     def __init__(self, canvas, ax):
