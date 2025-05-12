@@ -130,6 +130,7 @@ def read_from_serial():
 
                     if len(data) >= sample_count:
                         break
+                    stop_reading()
     except serial.SerialException as e:
         print(f"Serial error: {e}")
     except KeyboardInterrupt:
@@ -176,7 +177,6 @@ def ask_for_save_location(data):
             process_filtered_data(save_path)
         else:
             process_unfiltered_data(save_path)
-        subprocess.run(["python", "TeeSenseGUI.py", save_path])
     else:
         update_status("Save path cancelled", "warning")
 
