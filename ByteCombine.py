@@ -2,6 +2,7 @@ import csv
 import numpy as np
 import tkinter as tk
 from tkinter import filedialog
+import subprocess
 
 def process_unfiltered_data(file_path):
     avg_values = []
@@ -133,5 +134,6 @@ def process_filtered_data(file_path):
             writer.writerow(["Elapsed Time (s)", "Average (Filtered)"])
             writer.writerows(cleaned_data)
         print(f"Filtered data saved to {save_path}.")
+        subprocess.run(["python", "TeeSenseGUI.py", save_path])
     else:
         print("Save operation canceled.")
