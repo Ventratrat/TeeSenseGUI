@@ -23,8 +23,6 @@ def generate_plot(csv_file, return_raw=False):
     if len(x) == 0 or len(y) == 0:
         raise ValueError("No valid data found in the CSV file.")
 
-    baseline_offset = np.percentile(y, 5)  # Estimate baseline using the 5th percentile
-    y = [val - baseline_offset for val in y]
 
     x_min, x_max = min(x), max(x)
     y_min, y_max = min(y), max(y)
@@ -102,37 +100,6 @@ def calculate_parameters(data):
     filtered_data_for_min = column_data.drop(indices_to_exclude)
     average_min_current = filtered_data_for_min.rolling(window=5).min().mean() * 1e6  # in µA
 
-    # --- Overshoot ---
-    in_pulse = False
-    pulse_start_time = None
-    pulse_end_index = None
-
-    # Detect first pulse's start and end
-    for i in range(1, len(column_data) - 1):
-        prev = column_data.iloc[i - 1]
-        curr = column_data.iloc[i]
-        next_val = column_data.iloc[i + 1]
-        current_time = time_data.iloc[i]
-
-        if not in_pulse and curr > prev and curr >= next_val:
-            in_pulse = True
-            pulse_start_time = current_time
-
-        elif in_pulse and curr < prev and curr <= next_val:
-            in_pulse = False
-            pulse_end_index = i
-            break
-
-    # Estimate settled current from 50 samples after waiting 50 samples past pulse end
-    settled_current = 0
-    if pulse_end_index is not None and pulse_end_index + 100 < len(column_data):
-        settled_region = column_data.iloc[pulse_end_index + 50 : pulse_end_index + 100]
-        settled_current = settled_region.mean() * 1e6  # µA
-
-    # Overshoot = peak - settled
-    overshoot_peak = column_data.max() * 1e6  # µA
-    overshoot = overshoot_peak - settled_current
-    OS_percent = (overshoot / settled_current * 100) if settled_current != 0 else 0
 
 
     # --- Pulse Width (in µs) ---
@@ -163,7 +130,18 @@ def calculate_parameters(data):
     if rising_index is not None and falling_index is not None:
         pulse_width = (time_array[falling_index] - time_array[rising_index]) * 1e6
 
+ # --- Overshoot ---
+    settled_current = 0
+    if falling_index is not None and falling_index - 20 >= 0:
+        settled_region = column_data.iloc[falling_index - 20 : falling_index-5]
+        if not settled_region.empty:
+            settled_current = settled_region.mean() * 1e6  # µA
 
+    # Overshoot = peak - settled
+    overshoot_peak = column_data.max() * 1e6  # µA
+    overshoot = overshoot_peak - settled_current
+    OS_percent = (overshoot / settled_current * 100) if settled_current != 0 else 0
+    print(falling_index)
 
     # --- RMS Current ---
     current_rms = np.sqrt(np.mean(column_data**2)) * 1e6  # µA
