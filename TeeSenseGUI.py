@@ -5,7 +5,7 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as Navigatio
 from matplotlib.figure import Figure
 from matplotlib.ticker import MultipleLocator
 import matplotlib.pyplot as plt
-from csvRead import generate_plot, populate_table
+from csvRead import *
 import pandas as pd
 import numpy as np
 import sys
@@ -123,6 +123,9 @@ class Ui_MainWindow(object):
         self.recollect_btn = QPushButton("Recollect Data")
         self.recollect_btn.clicked.connect(self.recollect_data)
         self.controlLayout.addRow(self.recollect_btn)
+        self.zero_offset_btn = QPushButton("Zero Offset")
+        self.zero_offset_btn.clicked.connect(self.apply_zero_offset)
+        self.controlLayout.addRow(self.zero_offset_btn)
         
         self.sample_count_spin = QSpinBox()
         self.sample_count_spin.setRange(10, 10000)  # Reasonable range
@@ -591,6 +594,27 @@ class Ui_MainWindow(object):
         """Scan for available serial ports"""
         ports = serial.tools.list_ports.comports()
         return [port.device for port in ports]
+    
+    def apply_zero_offset(self):
+        try:
+            if not hasattr(self, 'last_y_data') or not self.last_y_data:
+                QMessageBox.warning(None, "Zero Offset", "No data available to offset.")
+                return
+
+            # Calculate 5th percentile baseline
+            baseline_offset = np.percentile(self.last_y_data, 5)
+            adjusted_y = [val - baseline_offset for val in self.last_y_data]
+
+            # Update the internal reference
+            self.last_y_data = adjusted_y
+
+            # Redraw graph
+            self.display_raw_data(self.last_x_data, self.last_y_data)
+            self.statusbar.showMessage("Baseline offset applied.", 3000)
+
+        except Exception as e:
+            QMessageBox.critical(None, "Error", f"Failed to apply zero offset:\n{e}")
+
 
 class MarkerManager:
     def __init__(self, canvas, ax):
