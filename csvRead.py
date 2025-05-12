@@ -133,10 +133,9 @@ def calculate_parameters(data):
     overshoot_peak = column_data.max() * 1e6  # µA
     overshoot = overshoot_peak - settled_current
     OS_percent = (overshoot / settled_current * 100) if settled_current != 0 else 0
-
-    if OS_percent < 0 or OS_percent > 100:
-        overshoot = overshoot_peak - average_max_current
-        OS_percent = (overshoot/average_max_current * 100)
+    if overshoot_peak - settled_current == overshoot_peak:
+        overshoot = 0
+    
 
 
     # --- Pulse Width (in µs) ---
