@@ -1,53 +1,571 @@
-from PyQt5 import QtCore, QtWidgets
-from PyQt5.QtWidgets import QFileDialog, QMessageBox, QVBoxLayout, QFrame, QComboBox, QLineEdit, QGroupBox, QPushButton, QFormLayout, QLabel, QHBoxLayout, QWidget, QTableWidget, QSpinBox
+﻿from PyQt5 import QtCore, QtWidgets
+from PyQt5.QtWidgets import QFileDialog, QMessageBox, QVBoxLayout, QFrame, QComboBox, QLineEdit, QGroupBox, QPushButton, QFormLayout, QLabel, QHBoxLayout, QWidget, QTableWidget, QMainWindow, QPushButton
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
+from matplotlib.backend_bases import MouseEvent
 from matplotlib.ticker import MultipleLocator
-import matplotlib.pyplot as plt
-from csvRead import *
+from csvRead import generate_plot, populate_table
 import pandas as pd
-import numpy as np
+import json
 import sys
-import serial
-import serial.tools.list_ports
-import traceback
 import time
-from dataCollect import *
+import tkinter as tk
+import threading
+from tkinter import messagebox
+import importlib
 
+import subprocess
+
+def start_data_collect_window():
+    root = tk.Tk()
+    root.title("Data Collection Window")
+
+    tk.Label(root, text="Data Collection Window", font=('Arial', 14)).pack(pady=10)
+
+    def start_data_collection():
+        messagebox.showinfo("Data Collection", "Data collection has started!")
+        print("Data collection has started...")
+
+    collect_button = tk.Button(root, text="Start Data Collection", command=start_data_collection)
+    collect_button.pack(pady=10)
+
+    close_button = tk.Button(root, text="Close DataCollect", command=root.quit)
+    close_button.pack(pady=10)
+
+    root.mainloop()
+
+# Function to start the Tkinter window (dataCollect)
+def start_tkinter_window():
+    global root
+    root = tk.Tk()
+    root.title("DataCollect")
+    tk.Label(root, text="This is the DataCollect window").pack()
+
+    tk.Button(root, text="Close DataCollect", command=root.quit).pack()
+
+    root.mainloop()  # Start the Tkinter event loop
+
+class MyMainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle('PyQt5 Window')
+        self.setGeometry(100, 100, 300, 200)
+        self.setStyleSheet("background-color: lightgray;")
+        
+    def closeEvent(self, event):
+        """Override close event to ensure the entire program exits when 'X' is clicked."""
+        ui = Ui_MainWindow()
+        ui.MainWindow = self  # Passing reference of the main window to the Ui_MainWindow instance
+        ui.closeEvent(event)
 
 class Ui_MainWindow(object):
+
+    def closeEvent(self, event):
+        """Handle the close event for the PyQt window."""
+        # Show a confirmation dialog when the user tries to close the window
+        reply = QMessageBox.question(self.MainWindow, 'Quit', 'Are you sure you want to quit?',
+                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        
+        if reply == QMessageBox.Yes:
+            print("PyQt5 window closed, exiting program...")
+
+            # Close the Tkinter window if it's open
+            if root:
+                root.quit()  # End the Tkinter event loop
+                root.destroy()  # Destroy the Tkinter window
+
+            event.accept()  # Allow the window to close
+            QApplication.quit()  # Exit the PyQt application
+        else:
+            event.ignore()  # Ignore the close event and keep the window open
+
+    def open_data_collect_window(self):
+        # Ensure we are closing the MainWindow correctly
+        self.MainWindow.close()  # Close the current window
+
+        # Run the dataCollect program as a subprocess
+        subprocess.Popen([sys.executable, 'dataCollect.py'])  # Assuming 'data_collect.py' is in the same directory
+
+    def retake_measurement(self):
+        if not hasattr(self, 'retake_settings'):
+            QMessageBox.warning(None, "Missing Settings", "No previous measurement settings found.")
+            return
+
+        settings = self.retake_settings
+        port = settings.get("port")
+        samples = settings.get("samples")
+        filter_mode = settings.get("filter_mode")
+
+        if not port:
+            QMessageBox.warning(None, "Invalid Settings", "Measurement settings are incomplete.")
+            return
+
+        try:
+            import serial
+            ser = serial.Serial(port, 115200, timeout=1)
+            ser.flushInput()
+        except Exception as e:
+            QMessageBox.critical(None, "Serial Error", f"Failed to open port {port}: {e}")
+            return
+
+        ser.write(b'RESET\n')
+        time.sleep(0.5)
+        ser.reset_input_buffer()
+
+        if filter_mode == "DC Bias":
+            # DC Bias specific logic
+            try:
+                print("Retaking DC Bias")
+                samples = []
+                skip_first = True
+                start_time = time.time()
+                timeout = 60
+
+                while time.time() - start_time < timeout:
+                    if ser.in_waiting:
+                        line = ser.readline().decode('utf-8').strip()
+                        try:
+                            parts = list(map(int, line.split()))
+                            if skip_first:
+                                print(f"Skipping first timing line: {parts}")
+                                skip_first = False
+                                continue
+                            if len(parts) == 4:
+                                samples.append(parts)
+                        except:
+                            continue
+                    else:
+                        time.sleep(0.001)
+
+                ser.close()
+
+                if not samples:
+                    QMessageBox.warning(None, "Error", "No data collected during DC Bias retake.")
+                    return
+
+                sample_interval = 1 / 1_220_000
+                formatted = [[i * sample_interval] + row for i, row in enumerate(samples)]
+
+                from ByteCombine import process_dc_bias_data
+                x_data, y_data = process_dc_bias_data(formatted, return_data=True)
+                self.retake_button.setEnabled(True)
+                self.load_direct_data(x_data, y_data, filtered=False, retake_settings=settings)
+
+
+            except Exception as e:
+                QMessageBox.critical(None, "Retake Error", f"DC Bias retake failed:\n{e}")
+            return
+
+        # For filtered/unfiltered modes
+        data = []
+        sample_interval = 1 / 1_220_000
+        sample_index = 0
+        skip_first = True
+        start_time = time.time()
+        timeout = 5
+
+        while len(data) < samples and (time.time() - start_time < timeout):
+            if ser.in_waiting:
+                line = ser.readline().decode('utf-8').strip()
+                try:
+                    parts = list(map(int, line.split()))
+                    if skip_first:
+                        print(f"⚠️ Skipping first timing line: {parts}")
+                        skip_first = False
+                        continue
+                    if len(parts) == 4:
+                        data.append([sample_index * sample_interval] + parts)
+                        sample_index += 1
+                except:
+                    continue
+            else:
+                time.sleep(0.001)
+
+        ser.close()
+
+        from ByteCombine import process_filtered_data, process_unfiltered_data
+        if filter_mode == "Filtered":
+            x_data, y_data = process_filtered_data(data, return_data=True)
+        else:
+            x_data, y_data = process_unfiltered_data(data, return_data=True)
+
+        self.load_direct_data(x_data, y_data, filtered=(filter_mode == "Filtered"), retake_settings=settings)
+        self.retake_button.setEnabled(True)
+
+    def on_pick(self, event):
+        for marker in self.markers:
+            if marker.line == event.artist:
+                self.dragging_marker = marker
+                marker.dragging = True
+                break
+
+    def on_motion(self, event):
+        if self.dragging_marker and event.inaxes:
+            new_pos = event.xdata if self.dragging_marker.orientation == 'vline' else event.ydata
+            self.dragging_marker.update_position(new_pos)
+            self.update_marker_labels()
+            self.canvas.draw_idle()
+
+    def on_release(self, event):
+        if self.dragging_marker:
+            self.dragging_marker.dragging = False
+            self.dragging_marker = None
+
+    def enable_check(self):
+        return self.marker_placement_enabled
+
+    def orientation_check(self):
+        return self.current_marker_orientation
+
+    def clear_all_markers(self):
+        for marker in self.markers:
+            marker.remove()
+        self.markers.clear()
+        self.marker_counter = 1
+        self.marker_info_label.setText("")
+        self.canvas.draw_idle()
+
+    def toggle_marker_placement(self):
+        self.marker_placement_enabled = not self.marker_placement_enabled
+        status = "ON" if self.marker_placement_enabled else "OFF"
+        self.enable_markers_btn.setText(f"Placement: {status}")
+
+    def toggle_marker_orientation(self):
+        if self.current_marker_orientation == "vline":
+            self.current_marker_orientation = "hline"
+            self.toggle_marker_orientation_btn.setText("Horizontal Marker")
+        else:
+            self.current_marker_orientation = "vline"
+            self.toggle_marker_orientation_btn.setText("Vertical Marker")
+
+    def update_marker_labels(self):
+        if hasattr(self, 'info_output') and hasattr(self, 'markers'):
+            x_unit = self.extract_unit(self.ax.get_xlabel())
+            y_unit = self.extract_unit(self.ax.get_ylabel())
+            lines = []
+            for m in self.markers:
+                unit = x_unit if m.orientation == 'vline' else y_unit
+                lines.append(f"{m.label}: {m.position:.4f} {unit}")
+            self.info_output("\n".join(lines))
+
+    def on_click(self, event):
+        if not hasattr(self, 'markers') or not hasattr(self, 'canvas'):
+            return
+
+        if not event.inaxes or not self.enable_check():
+            return
+
+        if event.button == 1:  # Left-click → Add marker
+            orientation = self.orientation_check()
+            position = event.xdata if orientation == 'vline' else event.ydata
+            label = f"M{self.marker_counter}"
+            marker = InteractiveMarker(self.ax, orientation, position, label=label)
+            self.markers.append(marker)
+            self.marker_counter += 1
+            self.update_marker_labels()
+
+        elif event.button == 3:  # Right-click → Delete nearest marker
+            for marker in self.markers:
+                if marker.line.contains(event)[0]:
+                    marker.remove()
+                    self.markers.remove(marker)
+                    break
+
+        # Update marker labels if info_output is available
+        self.update_marker_labels()
+
+        self.canvas.draw_idle()
+
+        # Update marker info if available
+        if hasattr(self, 'info_output'):
+            x_unit = self.extract_unit(self.ax.get_xlabel())
+            y_unit = self.extract_unit(self.ax.get_ylabel())
+            lines = []
+            for m in self.markers:
+                unit = x_unit if m.orientation == 'vline' else y_unit
+                lines.append(f"{m.label}: {m.position:.4f} {unit}")
+            self.info_output("\n".join(lines))
+
+        self.canvas.draw_idle()
+
+    def on_motion(self, event):
+        if not self.dragging_marker or not event.inaxes:
+            return
+
+        new_pos = event.xdata if self.dragging_marker.orientation == 'vline' else event.ydata
+        self.dragging_marker.update_position(new_pos)
+        self.update_marker_labels()
+        self.canvas.draw_idle()
+
+    def on_release(self, event):
+        self.dragging_marker = None
+        self.dragging_event = None
+
+    def orientation_check(self):
+        return getattr(self, 'current_marker_orientation', 'vline')
+
+    def enable_check(self):
+        return getattr(self, 'marker_placement_enabled', True)
+
+    def extract_unit(self, label_text):
+        # From "Current (mA)" → "mA"
+        if "(" in label_text and ")" in label_text:
+            return label_text.split("(")[-1].split(")")[0]
+
+    def prepare_and_display_data(self, x_data, y_data):
+        """
+        Applies current unit settings, axis controls, and calls display.
+        """
+        self.y_unit = self.unit_selector_y.currentText()
+        self.x_unit = self.unit_selector_x.currentText()
+
+        # Apply axis input settings
+        try: self.x_div = float(self.input_x_div.text())
+        except: self.x_div = None
+        try: self.y_div = float(self.input_y_div.text())
+        except: self.y_div = None
+        try: self.x_min = float(self.input_x_min.text().strip())
+        except: self.x_min = None
+        try: self.x_max = float(self.input_x_max.text().strip())
+        except: self.x_max = None
+        try: self.y_min = float(self.input_y_min.text().strip())
+        except: self.y_min = None
+        try: self.y_max = float(self.input_y_max.text().strip())
+        except: self.y_max = None
+
+        self.locked_xlim = None
+        self.locked_ylim = None
+        self.reference_trigger_time = None
+
+        self.display_raw_data(x_data, y_data)
+
+        self.last_x_data = x_data
+        self.last_y_data = y_data
+        self.current_file_path = None  # to signal in-memory mode
+
+    def load_direct_data(self, x_data, y_data, filtered=False, retake_settings=None):
+        self.reference_trigger_time = None
+        self.x_unit = self.unit_selector_x.currentText()
+        self.y_unit = self.unit_selector_y.currentText()
+
+        if retake_settings is not None:
+            self.retake_settings = retake_settings
+
+        self.last_x_data = x_data
+        self.last_y_data = y_data
+        self.current_file_path = None
+
+        populate_table(self.tableWidget, pd.DataFrame({
+            "Time": x_data,
+            "Current": y_data
+        }))
+
+        # Auto-detect trigger threshold if needed
+        threshold = None
+        try:
+            threshold = float(self.trigger_threshold.text())
+        except:
+            pass
+
+        trigger_index = 0
+        if threshold is not None:
+            for i in range(1, len(y_data)):
+                if y_data[i - 1] < threshold <= y_data[i]:
+                    trigger_index = i
+                    break
+
+        trigger_time = x_data[trigger_index]
+        aligned_x = [x - trigger_time for x in x_data]
+
+        print(f"Trigger threshold: {threshold}")
+        print(f"Trigger index: {trigger_index}")
+        print(f"Trigger time: {trigger_time}")
+        print(f"First aligned x: {aligned_x[0]:.6f}, Last: {aligned_x[-1]:.6f}")
+
+        self.prepare_and_display_data(aligned_x, y_data)
+        self.is_unsaved = True
+
+         # Store settings if provided
+        if retake_settings:
+            self.retake_settings = retake_settings
+            print("Retake settings received:", self.retake_settings)
+        else:
+            # Only disable if not previously set
+            if not hasattr(self, 'retake_settings'):
+                self.retake_settings = None
+
+        # Enable or disable the button based on whether settings exist
+        self.retake_button.setEnabled(self.retake_settings is not None)
+    
     def setupUi(self, MainWindow):
+
         MainWindow.setObjectName("MainWindow")
-        MainWindow.resize(1100, 600)
+        MainWindow.resize(1200, 700)
+        self.MainWindow = MainWindow  # Store reference to the MainWindow
+        self.markers = []
+        self.marker_counter = 1
+        self.marker_placement_enabled = False
+        self.current_marker_orientation = 'vline'  # or 'hline'
+        self.dragging_marker = None
+        self.dragging_event = None
+        self.figure = Figure()
+        self.canvas = FigureCanvas(self.figure)
+        self.ax = self.figure.add_subplot(111)  # Initialize to prevent None
+        # After plot area and right controls
+        self.marker_info_label = QtWidgets.QLabel("Markers will appear here")
+        self.marker_info_label.setWordWrap(True)
+        self.marker_info_label.setMinimumHeight(40)
+
+        self.last_x_data = None
+        self.last_y_data = None
+        self.current_file_path = None  # already exists
+
+        self.reference_trigger_time = None
 
         self.centralwidget = QtWidgets.QWidget(MainWindow)
         self.main_layout = QtWidgets.QHBoxLayout(self.centralwidget)
 
-        # ======= Plot Frame =======
+        # ========== Plot Area ==========
         self.plotFrame = QFrame(self.centralwidget)
-        self.plotLayout = QVBoxLayout(self.plotFrame)
+        self.plotOuterLayout = QHBoxLayout(self.plotFrame)
+        self.plotOuterLayout.setContentsMargins(0, 0, 0, 0)
+        self.plotOuterLayout.setSpacing(0)
+
+        # ----- Plot and Toolbar -----
+        self.plotLayout = QVBoxLayout()
+        self.plotLayout.setContentsMargins(0, 0, 0, 0)
+        self.plotLayout.setSpacing(0)
+
         self.figure = Figure()
         self.canvas = FigureCanvas(self.figure)
         self.toolbar = NavigationToolbar(self.canvas, self.plotFrame)
+
         self.plotLayout.addWidget(self.toolbar)
         self.plotLayout.addWidget(self.canvas)
 
-        # Add marker controls
-        self.markerPanel = QWidget()
-        self.markerControls = QHBoxLayout(self.markerPanel)
+        # ----- Marker Controls Panel -----
+        self.markerControls = QVBoxLayout()
+
         self.enable_markers_btn = QPushButton("Placement: OFF")
         self.toggle_marker_orientation_btn = QPushButton("Vertical Marker")
-        self.clear_markers_btn = QPushButton("Clear Markers")
         self.marker_info_label = QLabel("")
+        self.clear_markers_btn = QPushButton("Clear Markers")
 
+        self.markerControls.addWidget(self.clear_markers_btn)
         self.markerControls.addWidget(self.enable_markers_btn)
         self.markerControls.addWidget(self.toggle_marker_orientation_btn)
-        self.markerControls.addWidget(self.clear_markers_btn)
         self.markerControls.addWidget(self.marker_info_label)
         self.markerControls.addStretch()
-        self.markerPanel.setFixedWidth(500)
 
+        self.markerPanel = QWidget()
+        self.markerPanel.setLayout(self.markerControls)
+        self.markerPanel.setFixedWidth(160)
+
+        # Replace MarkerManager logic
+        self.clear_markers_btn.clicked.connect(self.clear_all_markers)
+        self.enable_markers_btn.clicked.connect(self.toggle_marker_placement)
+        self.toggle_marker_orientation_btn.clicked.connect(self.toggle_marker_orientation)
+        self.info_output = lambda text: self.marker_info_label.setText(text)
+
+        self.canvas.mpl_connect("pick_event", self.on_pick)
+        self.canvas.mpl_connect("motion_notify_event", self.on_motion)
+        self.canvas.mpl_connect("button_release_event", self.on_release)
+
+        # Set default marker state
+        self.marker_enabled = False
+        self.marker_orientation = 'vline'
+        self.markers = []
+        self.marker_counter = 1
+
+        # Add plot and marker panel side by side
+        self.plotOuterLayout.addLayout(self.plotLayout, stretch=1)
+        self.plotOuterLayout.addWidget(self.markerPanel)
+
+        # Add to main layout
+        self.main_layout.addWidget(self.plotFrame, stretch=2)
+
+        # ========== Right Side: Table + Graph Controls ==========
+        self.rightLayout = QVBoxLayout()
+
+        self.tableWidget = QTableWidget()
+        self.tableWidget.setColumnCount(2)
+        self.tableWidget.setHorizontalHeaderLabels(["Parameter", "Analysis"])
+        self.tableWidget.horizontalHeader().setStretchLastSection(True)
+        self.rightLayout.addWidget(self.tableWidget)
+
+        # --- Graph Controls ---
+        self.controlGroup = QGroupBox("Graph Controls")
+        self.controlLayout = QFormLayout(self.controlGroup)
+
+        self.unit_selector_y = QComboBox()
+        self.unit_selector_y.addItems(["uA", "mA", "A"])
+
+        self.unit_selector_x = QComboBox()
+        self.unit_selector_x.addItems(["us", "ms", "s"])
+
+        self.input_x_div = QLineEdit(); self.input_x_div.setPlaceholderText("e.g. 100")
+        self.input_y_div = QLineEdit(); self.input_y_div.setPlaceholderText("e.g. 50")
+
+        self.input_x_min = QLineEdit(); self.input_x_max = QLineEdit()
+        self.input_y_min = QLineEdit(); self.input_y_max = QLineEdit()
+        for line in [self.input_x_min, self.input_x_max, self.input_y_min, self.input_y_max]:
+            line.setPlaceholderText("Optional")
+
+        self.trigger_threshold = QLineEdit()
+        self.trigger_threshold.setPlaceholderText("e.g. 0.01 A")
+
+        self.apply_btn = QPushButton("Apply")
+        self.apply_btn.clicked.connect(self.apply_axis_settings)
+
+        # --- Retake Button ---
+        self.retake_button = QPushButton("Retake Measurement")
+        self.retake_button.setEnabled(False)  # Initially disabled until settings exist
+        self.retake_button.clicked.connect(self.retake_measurement)
+        self.rightLayout.addWidget(self.retake_button)
+
+        # --- Open Data Collect Window Button ---
+        self.open_button = QPushButton("Open Data Collect Window", self.centralwidget)
+        self.open_button.clicked.connect(self.open_data_collect_window)
+        self.rightLayout.addWidget(self.open_button)  # Add the button to the layout below the Retake button
+
+        # Setup the layout for the controls
+        self.controlLayout.addRow("Y-axis unit:", self.unit_selector_y)
+        self.controlLayout.addRow("X-axis unit:", self.unit_selector_x)
+        self.controlLayout.addRow("X units/div:", self.input_x_div)
+        self.controlLayout.addRow("Y units/div:", self.input_y_div)
+        self.controlLayout.addRow("X min:", self.input_x_min)
+        self.controlLayout.addRow("X max:", self.input_x_max)
+        self.controlLayout.addRow("Y min:", self.input_y_min)
+        self.controlLayout.addRow("Y max:", self.input_y_max)
+        self.controlLayout.addRow("Trigger Threshold:", self.trigger_threshold)
+        self.controlLayout.addRow(self.apply_btn)
+
+        self.rightLayout.addWidget(self.controlGroup)
+        self.main_layout.addLayout(self.rightLayout, stretch=1)
+
+        MainWindow.setCentralWidget(self.centralwidget)
+
+        # ========== Menu Bar ==========
+        self.menubar = QtWidgets.QMenuBar(MainWindow)
+        self.menuFile = QtWidgets.QMenu(self.menubar)
+        self.actionOpen = QtWidgets.QAction("Open")
+        self.actionOpen.triggered.connect(self.handle_open_action)
+        self.menuFile.addAction(self.actionOpen)
+        self.menubar.addMenu(self.menuFile)
+        MainWindow.setMenuBar(self.menubar)
+
+        # ========== Status Bar ==========
+        self.statusbar = QtWidgets.QStatusBar(MainWindow)
+        MainWindow.setStatusBar(self.statusbar)
+
+        self.markers = []  # 🔧 store all InteractiveMarker instances here
+        self.marker_counter = 1  # optional: for labeling M1, M2, etc.
+        self.retranslateUi(MainWindow)
+        QtCore.QMetaObject.connectSlotsByName(MainWindow)
+
+        # === Marker State Variables ===
         self.marker_enabled = False
         self.marker_orientation = 'vline'
 
@@ -66,120 +584,65 @@ class Ui_MainWindow(object):
         self.enable_markers_btn.clicked.connect(toggle_placement)
         self.toggle_marker_orientation_btn.clicked.connect(toggle_orientation)
 
-        self.marker_manager = MarkerManager(self.canvas, self.figure.gca())
-        self.clear_markers_btn.clicked.connect(lambda: self.marker_manager.clear_all_markers())
-        self.marker_manager.set_mode_callback(lambda: self.marker_enabled)
-        self.marker_manager.set_orientation_callback(lambda: self.marker_orientation)
-        self.marker_manager.set_info_callback(lambda text: self.marker_info_label.setText(text))
-
-        self.plotLayout.addWidget(self.markerPanel)
-        self.main_layout.addWidget(self.plotFrame, 2)
-
-        # ======= Table and Controls =======
-        self.rightLayout = QtWidgets.QVBoxLayout()
-
-        self.tableWidget = QTableWidget(self.centralwidget)
-        self.tableWidget.setColumnCount(2)
-        self.tableWidget.setHorizontalHeaderLabels(["Parameter", "Analysis"])
-        self.tableWidget.horizontalHeader().setStretchLastSection(True)
-        self.rightLayout.addWidget(self.tableWidget)
-
-        # ======= Controls =======
-        self.controlGroup = QGroupBox("Graph Controls")
-        self.controlLayout = QFormLayout(self.controlGroup)
-
-        self.unit_selector_y = QComboBox()
-        self.unit_selector_y.addItems(["uA", "mA", "A"])
-
-        self.unit_selector_x = QComboBox()
-        self.unit_selector_x.addItems(["us", "ms", "s"])
-
-        self.input_x_div = QLineEdit(); self.input_x_div.setPlaceholderText("e.g. 100")
-        self.input_y_div = QLineEdit(); self.input_y_div.setPlaceholderText("e.g. 50")
-
-        self.input_x_min = QLineEdit(); self.input_x_max = QLineEdit()
-        self.input_y_min = QLineEdit(); self.input_y_max = QLineEdit()
-
-        for line in [self.input_x_min, self.input_x_max, self.input_y_min, self.input_y_max]:
-            line.setPlaceholderText("Optional")
-
-        self.trigger_threshold = QLineEdit()
-        self.trigger_threshold.setPlaceholderText("e.g. 0.01 A")
-
-        self.apply_btn = QPushButton("Apply")
-        self.apply_btn.clicked.connect(self.apply_axis_settings)
-
-        self.controlLayout.addRow("Y-axis unit:", self.unit_selector_y)
-        self.controlLayout.addRow("X-axis unit:", self.unit_selector_x)
-        self.controlLayout.addRow("X units/div:", self.input_x_div)
-        self.controlLayout.addRow("Y units/div:", self.input_y_div)
-        self.controlLayout.addRow("X min:", self.input_x_min)
-        self.controlLayout.addRow("X max:", self.input_x_max)
-        self.controlLayout.addRow("Y min:", self.input_y_min)
-        self.controlLayout.addRow("Y max:", self.input_y_max)
-        self.controlLayout.addRow("Trigger Threshold:", self.trigger_threshold)
-        self.controlLayout.addRow(self.apply_btn)
-        
-        self.recollect_btn = QPushButton("Recollect Data")
-        self.recollect_btn.clicked.connect(self.recollect_data)
-        self.controlLayout.addRow(self.recollect_btn)
-        self.zero_offset_btn = QPushButton("Zero Offset")
-        self.zero_offset_btn.clicked.connect(self.apply_zero_offset)
-        self.controlLayout.addRow(self.zero_offset_btn)
-        
-        self.sample_count_spin = QSpinBox()
-        self.sample_count_spin.setRange(10, 10000)  # Reasonable range
-        self.sample_count_spin.setValue(200)  # Default value
-        self.controlLayout.addRow("Sample Count:", self.sample_count_spin)
-
-        self.rightLayout.addWidget(self.controlGroup)
-        self.main_layout.addLayout(self.rightLayout, 1)
-        MainWindow.setCentralWidget(self.centralwidget)
-
-        # ======= Menu Bar =======
-        self.menubar = QtWidgets.QMenuBar(MainWindow)
-        self.menuFile = QtWidgets.QMenu(self.menubar)
-        self.actionOpen = QtWidgets.QAction("Open")
-        self.actionExportCSV = QtWidgets.QAction("Export Data as CSV")
-        self.menuFile.addAction(self.actionOpen)
-        self.menuFile.addAction(self.actionExportCSV)
-        self.menubar.addMenu(self.menuFile)
-
-        self.menuAnalysis = QtWidgets.QMenu(self.menubar)
-        self.actionFilteringWindow = QtWidgets.QAction("Filtering Window")
-        self.actionDCBias = QtWidgets.QAction("DC Bias")
-        self.menuAnalysis.addAction(self.actionFilteringWindow)
-        self.menuAnalysis.addAction(self.actionDCBias)
-        self.menubar.addMenu(self.menuAnalysis)
-
-        MainWindow.setMenuBar(self.menubar)
-
-        self.statusbar = QtWidgets.QStatusBar(MainWindow)
-        MainWindow.setStatusBar(self.statusbar)
-
-        self.actionOpen.triggered.connect(self.handle_open_action)
-        self.actionExportCSV.triggered.connect(self.export_csv)
-        self.actionFilteringWindow.triggered.connect(self.handle_filtering_window)
-        self.actionDCBias.triggered.connect(self.handle_dc_bias)
-
+        # === Internal State Initialization ===
         self.current_file_path = None
         self.is_unsaved = False
-        self.y_unit = "A"
-        self.x_unit = "s"
+
+        self.y_unit = "mA"
+        self.x_unit = "us"
+
+        # Unit scales (for display conversions)
         self.unit_scale_y = {"uA": 1e6, "mA": 1e3, "A": 1}
         self.unit_scale_x = {"us": 1e6, "ms": 1e3, "s": 1}
+
+        # User axis settings
         self.x_div = None
         self.y_div = None
-        self.x_min = 0
+        self.x_min = None
         self.x_max = None
         self.y_min = None
         self.y_max = None
-        self.reference_trigger_time = None
 
-        self.retranslateUi(MainWindow)
-        QtCore.QMetaObject.connectSlotsByName(MainWindow)
+        # Triggering and axis control
+        self.reference_trigger_time = None
+        self.locked_xlim = None
+
+
+    def export_csv(self):
+        if not hasattr(self, "last_x_data") or not hasattr(self, "last_y_data"):
+            QMessageBox.warning(None, "No Data", "No data to export. Please load a file first.")
+            return
+
+        file_path, _ = QFileDialog.getSaveFileName(
+            None, "Save CSV", "", "CSV Files (*.csv)"
+        )
+        if not file_path:
+            return
+
+        x_scale = self.unit_scale_x.get(self.x_unit, 1)
+        y_scale = self.unit_scale_y.get(self.y_unit, 1)
+
+        try:
+            with open(file_path, "w", newline="") as f:
+                f.write(f"Time ({self.x_unit}),Current ({self.y_unit})\n")
+                for x, y in zip(self.last_x_data, self.last_y_data):
+                    f.write(f"{x * x_scale},{y * y_scale}\n")
+            QMessageBox.information(None, "Success", "CSV file saved successfully.")
+        except Exception as e:
+            QMessageBox.warning(None, "Error", f"Failed to save CSV:\n{e}")
+
+    def retranslateUi(self, MainWindow):
+        _translate = QtCore.QCoreApplication.translate
+        MainWindow.setWindowTitle(_translate("MainWindow", "TeeSense Current Pulse Display"))
+        self.menuFile.setTitle(_translate("MainWindow", "&File"))
+        self.actionOpen.setText(_translate("MainWindow", "Open"))
+        self.actionExportCSV = QtWidgets.QAction("Export Data as CSV")
+        self.menuFile.addAction(self.actionExportCSV)
+        self.actionExportCSV.triggered.connect(self.export_csv)
 
     def apply_axis_settings(self):
+        print("apply_axis_settings called")
+
         self.y_unit = self.unit_selector_y.currentText()
         self.x_unit = self.unit_selector_x.currentText()
 
@@ -189,76 +652,61 @@ class Ui_MainWindow(object):
         try: self.y_div = float(self.input_y_div.text())
         except: self.y_div = None
 
-        try: self.x_min = float(self.input_x_min.text())
+        try: self.x_min = float(self.input_x_min.text().strip())
         except: self.x_min = None
 
-        try: self.x_max = float(self.input_x_max.text())
+        try: self.x_max = float(self.input_x_max.text().strip())
         except: self.x_max = None
 
-        try: self.y_min = float(self.input_y_min.text())
+        try: self.y_min = float(self.input_y_min.text().strip())
         except: self.y_min = None
 
-        try: self.y_max = float(self.input_y_max.text())
+        try: self.y_max = float(self.input_y_max.text().strip())
         except: self.y_max = None
+
+        print(f"🧪 Parsed X min/max: {self.x_min}, {self.x_max}")
+        print(f"🧪 Parsed Y min/max: {self.y_min}, {self.y_max}")
 
         self.locked_xlim = None
         self.locked_ylim = None
         self.reference_trigger_time = None
 
-        if self.current_file_path and self.current_file_path.endswith('.csv'):
-            self.open_excel_file(self.current_file_path)
+        # Prioritize .csv file if loaded
+        if self.current_file_path:
+            if self.current_file_path.endswith('.csv'):
+                print("Re-opening .csv file...")
+                self.open_excel_file(self.current_file_path)
+            else:
+                print("current_file_path is set but not a .csv — skipping.")
+        elif self.last_x_data is not None and self.last_y_data is not None:
+            print("Re-triggering and redrawing direct-loaded data...")
+            self.load_direct_data(self.last_x_data, self.last_y_data, )
+        else:
+            print("No data source available — nothing to update.")
 
-    def retranslateUi(self, MainWindow):
-        _translate = QtCore.QCoreApplication.translate
-        MainWindow.setWindowTitle(_translate("MainWindow", "TeeSense Current Pulse Display"))
-        self.menuFile.setTitle(_translate("MainWindow", "&File"))
-        self.menuAnalysis.setTitle(_translate("MainWindow", "&Analysis"))
-        self.actionOpen.setText(_translate("MainWindow", "Open"))
-        self.actionExportCSV.setText(_translate("MainWindow", "Export Data as CSV"))
-        self.actionFilteringWindow.setText(_translate("MainWindow", "Filtering Window"))
-        self.actionDCBias.setText(_translate("MainWindow", "DC Bias"))
+        self.canvas.draw_idle() 
 
-    def display_matplotlib_graph(self, figure):
-        """Displays the matplotlib graph with scaling, ticks, and axis limits."""
-        self.figure.clear()
-        ax = self.figure.add_subplot(111)
-        ax.set_title("Current Pulse Data")
-
-        y_scale = self.unit_scale_y.get(self.y_unit, 1)
-        x_scale = self.unit_scale_x.get(self.x_unit, 1)
-
-        for fig_ax in figure.axes:
-            for line in fig_ax.lines:
-                x = [v * x_scale for v in line.get_xdata()]
-                y = [v * y_scale for v in line.get_ydata()]
-                ax.plot(x, y, label=line.get_label(), linestyle='dashed', marker='o')
-
-        ax.set_xlabel(f"Time ({self.x_unit})")
-        ax.set_ylabel(f"Current ({self.y_unit})")
-        ax.grid(True)
-        ax.legend()
-
-        if self.x_min is not None and self.x_max is not None:
-            ax.set_xlim(self.x_min, self.x_max)
-        if self.y_min is not None and self.y_max is not None:
-            ax.set_ylim(self.y_min, self.y_max)
-
-        if self.x_div:
-            min_x, max_x = ax.get_xlim()
-            ax.set_xticks([min_x + i * self.x_div for i in range(int((max_x - min_x) / self.x_div) + 1)])
-        if self.y_div:
-            min_y, max_y = ax.get_ylim()
-            ax.set_yticks([min_y + i * self.y_div for i in range(int((max_y - min_y) / self.y_div) + 1)])
-
-        self.canvas.draw()
+    def handle_open_action(self):
+        file_path, _ = QFileDialog.getOpenFileName(None, "Open File", "", "CSV Files (*.csv);;JSON Files (*.json)")
+        if file_path:
+            self.current_file_path = file_path
+            if file_path.endswith('.csv'):
+                self.open_excel_file(file_path)
+            else:
+                QMessageBox.warning(None, "Error", "Unsupported file type.")
 
     def open_excel_file(self, file_path):
         try:
+            self.x_unit = self.unit_selector_x.currentText()
+            self.y_unit = self.unit_selector_y.currentText()
             data = pd.read_csv(file_path)
             populate_table(self.tableWidget, data)
-            figure = generate_plot(file_path)
-            self.display_matplotlib_graph(figure)
+            
+            self.locked_ylim = None 
+           
             raw_x, raw_y = generate_plot(file_path, return_raw=True)
+
+         
             try:
                 threshold = float(self.trigger_threshold.text())
             except:
@@ -280,24 +728,22 @@ class Ui_MainWindow(object):
 
             
             aligned_x = [x - trigger_time for x in raw_x]
+            
+            print(f"x_unit: {self.x_unit}")
+            print(f"x_scale: {self.unit_scale_x.get(self.x_unit, 1)}")
+            print(f"x range (raw): {min(raw_x)} to {max(raw_x)}")
+            print(f"x range (scaled): {[min(raw_x)*self.unit_scale_x.get(self.x_unit,1), max(raw_x)*self.unit_scale_x.get(self.x_unit,1)]}")
             self.display_raw_data(aligned_x, raw_y)
-
-            # --- rebind markers to new plot ---
-            new_ax = self.figure.axes[0]
-            self.marker_manager.ax = new_ax
-            self.marker_manager.markers.clear()
-            self.marker_manager.marker_counter = 1
-            if hasattr(self.marker_manager, 'info_output'):
-                self.marker_manager.info_output("")
-
             self.is_unsaved = True
+
         except Exception as e:
             QMessageBox.warning(None, "Error", f"Could not load CSV file:\n{e}")
 
+
     def display_raw_data(self, x_data, y_data):
         self.figure.clear()
-        ax = self.figure.add_subplot(111)
-        ax.set_title("Current Pulse Data")
+        self.ax = self.figure.add_subplot(111)
+        self.ax.set_title("Current Pulse Data")
 
         self.last_x_data = x_data
         self.last_y_data = y_data
@@ -307,53 +753,68 @@ class Ui_MainWindow(object):
         x = [v * x_scale for v in x_data]
         y = [v * y_scale for v in y_data]
 
-        ax.plot(x, y, label="Pulse", linestyle='-', marker='o')
-        ax.set_xlabel(f"Time ({self.x_unit})")
-        ax.set_ylabel(f"Current ({self.y_unit})")
-        ax.grid(True)
-        ax.legend()
+        self.ax.plot(x, y, label="Pulse", linestyle='-', marker='o')
+        self.ax.set_xlabel(f"Time ({self.x_unit})")
+        self.ax.set_ylabel(f"Current ({self.y_unit})")
+        self.ax.grid(True)
+        self.ax.legend()
 
         # --- X Axis ---
         final_x_min, final_x_max = self.compute_axis_limits(
             x, self.x_min, self.x_max, self.x_div, "X", is_x_axis=True
         )
-        ax.set_xlim(final_x_min, final_x_max)
+        self.ax.set_xlim(final_x_min, final_x_max)
         self.locked_xlim = (final_x_min, final_x_max)
 
         if self.x_div and (self.x_min is None or self.x_max is None):
-            min_x, max_x = ax.get_xlim()
+            min_x, max_x = self.ax.get_xlim()
             start_tick = (min_x // self.x_div) * self.x_div
-            end_tick = (max_x // self.x_div + 20) * self.x_div  # extend beyond visible range
-
+            end_tick = (max_x // self.x_div + 20) * self.x_div
             ticks = []
             val = start_tick
             while val <= end_tick:
                 ticks.append(val)
                 val += self.x_div
-            if self.x_div and (self.x_min is None or self.x_max is None):
-                ax.xaxis.set_major_locator(MultipleLocator(self.x_div))
+            self.ax.set_xticks(ticks)
 
         # --- Y Axis ---
         final_y_min, final_y_max = self.compute_axis_limits(
             y, self.y_min, self.y_max, self.y_div, "Y", is_x_axis=False
         )
-        ax.set_ylim(final_y_min, final_y_max)
+        self.ax.set_ylim(final_y_min, final_y_max)
         self.locked_ylim = (final_y_min, final_y_max)
 
         if self.y_div and (self.y_min is None or self.y_max is None):
-            min_y, max_y = ax.get_ylim()
+            min_y, max_y = self.ax.get_ylim()
             start_tick = (min_y // self.y_div) * self.y_div
-            end_tick = (max_y // self.y_div + 20) * self.y_div  # extend above view
-
+            end_tick = (max_y // self.y_div + 20) * self.y_div
             ticks = []
             val = start_tick
             while val <= end_tick:
                 ticks.append(val)
                 val += self.y_div
-            if self.y_div and (self.y_min is None or self.y_max is None):
-                ax.yaxis.set_major_locator(MultipleLocator(self.y_div))
+            self.ax.set_yticks(ticks)
 
-        self.canvas.draw()
+        # --- Redraw Markers on Fresh Axes ---
+        new_markers = []
+        for old_marker in self.markers:
+            m = InteractiveMarker(self.ax, old_marker.orientation, old_marker.position, old_marker.label)
+            new_markers.append(m)
+        self.markers = new_markers
+
+        # Reconnect click handler to new canvas/axes
+        self.canvas.mpl_disconnect(getattr(self, '_marker_click_cid', None))
+        self._marker_click_cid = self.canvas.mpl_connect("button_press_event", self.on_click)
+        self.canvas.mpl_disconnect(getattr(self, "_click_cid", None))
+        self.canvas.mpl_disconnect(getattr(self, "_release_cid", None))
+        self.canvas.mpl_disconnect(getattr(self, "_motion_cid", None))
+
+        self._click_cid = self.canvas.mpl_connect("button_press_event", self.on_click)
+        self._release_cid = self.canvas.mpl_connect("button_release_event", self.on_release)
+        self._motion_cid = self.canvas.mpl_connect("motion_notify_event", self.on_motion)
+
+        self.canvas.draw_idle() 
+        
 
     def compute_axis_limits(self, data, min_val, max_val, units_per_div, label, is_x_axis=True):
         NUM_DIVS = 10
@@ -376,247 +837,74 @@ class Ui_MainWindow(object):
             axis_max = data_max + pad
             reason = "auto"
 
-        print(f"📊 Using {reason} for {label}: {axis_min} to {axis_max}")
+        print(f"Using {reason} for {label}: {axis_min} to {axis_max}")
         return axis_min, axis_max
 
+    def save_file(self):
+        if self.current_file_path:
+            self.save_workspace(self.current_file_path)
+        else:
+            file_path, _ = QFileDialog.getSaveFileName(None, "Save Workspace As", "", "JSON Files (*.json)")
+            if file_path:
+                self.current_file_path = file_path
+                self.save_workspace(file_path)
 
-    def handle_open_action(self):
-        file_path, _ = QFileDialog.getOpenFileName(None, "Open File", "", "CSV Files (*.csv);;JSON Files (*.json)")
-        if file_path:
-            self.current_file_path = file_path
-            if file_path.endswith('.csv'):
-                self.open_excel_file(file_path)
-            else:
-                QMessageBox.warning(None, "Error", "Unsupported file type.")
-
-    def export_csv(self):
-
-        # Get the figure and axis from the plot (assuming it's the first axis in the figure)
-        figure = plt.gcf()  # Get current figure
-        ax = figure.gca()  # Get the current axis
-
-        # Check if the axis has any lines (plots) and get data from them
-        lines = ax.get_lines()
-        if not lines:
-            QMessageBox.warning(None, "No Data", "No data to export from the plot.")
-            return
-
-        # If there are multiple lines, you may want to export the data for each
-        # We'll assume you're interested in the data from the first line here
-        x_data, y_data = lines[0].get_data()
-
-        # Apply unit scaling if necessary
-        x_scale = self.unit_scale_x.get(self.x_unit, 1)
-        y_scale = self.unit_scale_y.get(self.y_unit, 1)
-
-        # Prompt the user to choose a file location to save the CSV
-        file_path, _ = QFileDialog.getSaveFileName(
-            None, "Save CSV", "", "CSV Files (*.csv)"
-        )
-        if not file_path:
-            return
-
+    def save_workspace(self, file_path):
+        workspace_data = {
+            "current_file_path": self.current_file_path,
+            "is_unsaved": self.is_unsaved,
+        }
         try:
-            # Open the file and write data to it
-            with open(file_path, "w", newline="") as f:
-                f.write(f"Time ({self.x_unit}),Current ({self.y_unit})\n")  # CSV header
-                for x, y in zip(x_data, y_data):
-                    f.write(f"{x * x_scale},{y * y_scale}\n")
-            
-            QMessageBox.information(None, "Success", "CSV file saved successfully.")
+            with open(file_path, 'w') as json_file:
+                json.dump(workspace_data, json_file, indent=4)
+            QMessageBox.information(None, "Save Successful", "Workspace saved successfully.")
         except Exception as e:
-            QMessageBox.warning(None, "Error", f"Failed to save CSV:\n{e}")
+            QMessageBox.warning(None, "Save Failed", f"Could not save workspace:\n{e}")
 
-    def moving_average(self, data, window_size=3):
-        if window_size < 1:
-            return data
-        padded = np.pad(data, (window_size//2, window_size-1-window_size//2), mode='edge')
-        return np.convolve(padded, np.ones(window_size)/window_size, mode='valid').tolist()
+class InteractiveMarker:
+    def __init__(self, ax, orientation, position, label="M", color='r'):
+        self.ax = ax
+        self.orientation = orientation
+        self.position = position
+        self.label = label
+        self.color = color
 
+        if orientation == 'vline':
+            self.line = ax.axvline(position, color=color, linestyle='-', linewidth=1.5, picker=True)
+            self.text = ax.text(position, ax.get_ylim()[1], label, color=color, fontsize=9,
+                                ha='left', va='top', backgroundcolor='white')
+        else:
+            self.line = ax.axhline(position, color='b', linestyle='-', linewidth=1.5, picker=True)
+            self.text = ax.text(ax.get_xlim()[1], position, label, color='b', fontsize=9,
+                                ha='right', va='bottom', backgroundcolor='white')
 
-    def handle_filtering_window(self):
-        if not self.figure.axes:
-            QMessageBox.warning(None, "Filtering Error", "No data to filter.")
-            return
+        self.dragging = False
 
-        window_size, ok = QtWidgets.QInputDialog.getInt(None, "Moving Average Filter", "Enter window size:", min=1, value=3)
-        if not ok:
-            return
+    def update_position(self, new_pos):
+        self.position = new_pos
+        if self.orientation == 'vline':
+            self.line.set_xdata([new_pos, new_pos])
+            self.text.set_position((new_pos, self.ax.get_ylim()[1]))
+        else:
+            self.line.set_ydata([new_pos, new_pos])
+            self.text.set_position((self.ax.get_xlim()[1], new_pos))
 
-        ax = self.figure.axes[0]
-        filtered_figure = Figure()
-        new_ax = filtered_figure.add_subplot(111)
-
-        for line in ax.lines:
-            x_data = line.get_xdata()
-            y_data = line.get_ydata()
-            filtered_y = self.moving_average(y_data, window_size)
-
-            # Keep x_data same length as y_data
-            if len(filtered_y) != len(x_data):
-                delta = len(x_data) - len(filtered_y)
-                if delta > 0:
-                    x_data = x_data[delta//2 : -((delta+1)//2)]
-                elif delta < 0:
-                    filtered_y = filtered_y[:len(x_data)]
-
-            new_ax.plot(x_data, filtered_y, label=f"{line.get_label()}", linestyle='-', marker='')
-
-        self.display_matplotlib_graph(filtered_figure)
-
-    def handle_dc_bias(self):
-        try:
-            ax = self.figure.axes[0]
-
-            all_y_values = []
-
-            for line in ax.lines:
-                y_data = line.get_ydata()
-                all_y_values.extend(y_data)
-
-            if not all_y_values:
-                QMessageBox.warning(None, "DC Bias", "No data available to display DC bias.")
-                return
-
-            # Calculate average (DC bias level)
-            dc_bias_value = sum(all_y_values) / len(all_y_values)
-
-
-            ax.clear()
-            for line in self.figure.axes[0].lines:
-                ax.plot(line.get_xdata(), line.get_ydata(), label=line.get_label(), linestyle='--', alpha=0.4)
-
-            # Plot a horizontal line at the DC level
-            ax.axhline(dc_bias_value, color='g', linestyle='--', linewidth=2, label=f"DC Bias: {dc_bias_value:.2f} {self.y_unit}")
-            ax.set_title("DC Bias Display Mode")
-            ax.set_xlabel(f"Time ({self.x_unit})")
-            ax.set_ylabel(f"Current ({self.y_unit})")
-            ax.grid()
-            ax.legend()
-            self.canvas.draw()
-
-        except Exception as e:
-            QMessageBox.warning(None, "DC Bias Error", f"Error applying DC bias mode:\n{e}")
-            
-    def recollect_data(self):
-        try:
-             # Get sample count from UI
-             sample_count = self.sample_count_spin.value()
-             print(f"Attempting to collect {sample_count} samples")
-
-             # Case 1: Use existing connection if available
-             if hasattr(self, 'ser') and self.ser and self.ser.is_open:
-                  print(f"Reusing existing connection to {self.serial_port}")
-
-            # Case 2: Try to auto-detect from dataCollect.py (if running)
-             elif 'ser' in globals() and hasattr(globals()['ser'], 'is_open') and globals()['ser'].is_open:
-                 self.serial_port = globals()['ser'].port
-                 self.ser = globals()['ser']
-                 print(f"User chosen connection : {self.serial_port}")
-        
-             # Case 3: Manual port selection
-             else:
-                ports = self.scan_serial_ports()
-                if not ports:
-                    raise ValueError("No serial ports detected")
-            
-                port, ok = QtWidgets.QInputDialog.getItem(
-                    None, "Select Port", "Available COM ports:", ports, 0, False
-                )
-                if not ok:
-                    return
-            
-                self.serial_port = port
-                self.ser = serial.Serial(port, 115200, timeout=1)
-                print(f"Manually connected to {port}")
-
-             # Verify connection
-             if not self.ser.is_open:
-                raise ValueError(f"Failed to connect to {self.serial_port}")
-        
-            # Initialize data collection
-             collected_data = []
-             start_time = time.time()
-        
-             # Collect data until we reach sample count
-             while len(collected_data) < sample_count:
-                if self.ser.in_waiting:
-                    line = self.ser.readline().decode('utf-8').strip()
-                    if line:  # Only process non-empty lines
-                        try:
-                            # Assuming data comes as comma-separated values (time, current)
-                             time_val, current_val = map(float, line.split(','))
-                             collected_data.append((time_val, current_val))
-                        
-                            # Update status every 10 samples
-                             if len(collected_data) % 10 == 0:
-                                self.statusbar.showMessage(
-                                     f"Collected {len(collected_data)}/{sample_count} samples", 
-                                     1000
-                                )
-                                QtWidgets.QApplication.processEvents()  # Keep UI responsive
-                            
-                        except ValueError as e:
-                             print(f"Error parsing line: {line} - {str(e)}")
-        
-             # Create DataFrame from collected data
-             df = pd.DataFrame(collected_data, columns=['Time', 'Current'])
-        
-             if df.empty:
-                raise ValueError("No valid data was collected")
-        
-             # Update UI
-             populate_table(self.tableWidget, df)
-             figure = generate_plot(dataframe=df)
-        
-             if hasattr(self, 'current_figure'):
-                 plt.close(self.current_figure)
-        
-             self.display_matplotlib_graph(figure)
-             self.current_figure = figure
-        
-             # Show completion message
-             elapsed = time.time() - start_time
-             msg = f"Collected {len(df)} samples in {elapsed:.2f} seconds"
-             self.statusbar.showMessage(msg, 5000)
-             QMessageBox.information(None, "Success", msg)
-
-        except ValueError as e:
-            QMessageBox.warning(None, "Data Error", str(e))
-        except Exception as e:
-            QMessageBox.critical(None, "Error", f"Failed to collect data:\n{str(e)}")
-            print(f"Error traceback:\n{traceback.format_exc()}")
-        finally:
-         # Don't close serial connection - keep it open for future use
-          pass
-      
-    def scan_serial_ports(self):
-        """Scan for available serial ports"""
-        ports = serial.tools.list_ports.comports()
-        return [port.device for port in ports]
-    
-    def apply_zero_offset(self):
-        try:
-            if not hasattr(self, 'last_y_data') or not self.last_y_data:
-                QMessageBox.warning(None, "Zero Offset", "No data available to offset.")
-                return
-
-            # Calculate 5th percentile baseline
-            baseline_offset = np.percentile(self.last_y_data, 5)
-            adjusted_y = [val - baseline_offset for val in self.last_y_data]
-
-            # Update the internal reference
-            self.last_y_data = adjusted_y
-
-            # Redraw graph
-            self.display_raw_data(self.last_x_data, self.last_y_data)
-            self.statusbar.showMessage("Baseline offset applied.", 3000)
-
-        except Exception as e:
-            QMessageBox.critical(None, "Error", f"Failed to apply zero offset:\n{e}")
-
+    def remove(self):
+        self.line.remove()
+        self.text.remove()
 
 class MarkerManager:
+    def reconnect(self):
+        self.canvas.mpl_disconnect(self.cid_click)
+        self.canvas.mpl_disconnect(self.cid_release)
+        self.canvas.mpl_disconnect(self.cid_motion)
+        self.canvas.mpl_disconnect(self.cid_pick)
+
+        self.cid_click = self.canvas.mpl_connect('button_press_event', self.on_click)
+        self.cid_release = self.canvas.mpl_connect('button_release_event', self.on_release)
+        self.cid_motion = self.canvas.mpl_connect('motion_notify_event', self.on_motion)
+        self.cid_pick = self.canvas.mpl_connect('pick_event', self.on_pick)
+    
     def __init__(self, canvas, ax):
         self.marker_counter = 1
         self.canvas = canvas
@@ -628,13 +916,18 @@ class MarkerManager:
         self.cid_motion = self.canvas.mpl_connect('motion_notify_event', self.on_motion)
         self.cid_pick = self.canvas.mpl_connect('pick_event', self.on_pick)
 
+    def extract_unit(self, label: str) -> str:
+        """Extracts unit from axis label like 'Time (us)' → 'us'"""
+        if '(' in label and ')' in label:
+            return label.split('(')[-1].split(')')[0]
+        return ''
+
     def clear_all_markers(self):
         for marker in self.markers:
             marker.remove()
         self.markers.clear()
         self.marker_counter = 1
-        if hasattr(self, 'info_output'):
-            self.info_output("")  # clear label
+        self.update_marker_labels()
         self.canvas.draw_idle()
 
     def set_mode_callback(self, fn):
@@ -646,45 +939,36 @@ class MarkerManager:
     def set_info_callback(self, fn):
         self.info_output = fn
 
-    def on_click(self, event):
+    def on_click(self, event: MouseEvent):
+        print(f"Click at ({event.xdata}, {event.ydata})")  # Debug
         if not event.inaxes or not self.enable_check():
             return
 
-        if event.button == 1:
+        if event.button == 1:  # Left click → add marker
             orientation = self.orientation_check()
-            
-            if orientation == 'vline':
-                position = event.xdata 
-            else:
-                position = event.ydata 
+            position = event.xdata if orientation == 'vline' else event.ydata
             marker_label = f"M{self.marker_counter}"
-            
             marker = InteractiveMarker(self.ax, orientation, position, label=marker_label)
+            print(f"Added {orientation} marker at {position}")
+            print(f"Axes title: {self.ax.get_title()}")
+            print(f"Line object: {marker.line}")
             self.marker_counter += 1
             self.markers.append(marker)
-            
-            if hasattr(self, 'info_output'):
-                text_lines = []
-                for m in self.markers:
-                    x_label = self.ax.get_xlabel() if self.ax.get_xlabel() else "Time"
-                    y_label = self.ax.get_ylabel() if self.ax.get_ylabel() else "Current"
-                    
-                    unit = x_label.split()[-1] if m.orientation == 'vline' else y_label.split()[-1]
-                    text_lines.append(f"{m.label}: {m.position:.4f} {unit}")
 
-                self.info_output("\n".join(text_lines))
+            # Update marker labels
+            self.update_marker_labels()
 
             self.canvas.draw_idle()
 
         elif event.button == 3:
             for marker in self.markers:
                 if marker.line.contains(event)[0]:
-                    marker.remove()  
+                    marker.remove()
                     self.markers.remove(marker)
-                    self.canvas.draw_idle() 
+                    self.active_marker = None  # Ensure drag state is cleared
+                    self.canvas.draw_idle()
+                    self.update_marker_labels()
                     break
-
-
 
     def on_pick(self, event):
         for marker in self.markers:
@@ -704,50 +988,27 @@ class MarkerManager:
             self.active_marker.update_position(new_pos)
             self.canvas.draw_idle()
 
-            # ✅ Update the label live
-            if hasattr(self, 'info_output'):
-                text_lines = []
-                for m in self.markers:
-                    unit = self.ax.get_xlabel().split()[-1] if m.orientation == 'vline' else self.ax.get_ylabel().split()[-1]
-                    text_lines.append(f"{m.label}: {m.position:.4f} {unit}")
-                self.info_output("\n".join(text_lines))
+            # Update the label live
+            self.update_marker_labels()
 
+    def update_marker_labels(self):
+        if not hasattr(self, 'info_output'):
+            return
 
-class InteractiveMarker:
-    def __init__(self, ax, orientation, position, label):
-        self.ax = ax
-        self.orientation = orientation  # 'vline' or 'hline'
-        self.position = position
-        self.label = label
-        self.dragging = False
+        x_unit = self.extract_unit(self.ax.get_xlabel())
+        y_unit = self.extract_unit(self.ax.get_ylabel())
 
-        if self.orientation == 'vline':
-            self.line = ax.axvline(x=position, color='r', linestyle='--', label=self.label, picker=5)
-        else:
-            self.line = ax.axhline(y=position, color='b', linestyle='--', label=self.label, picker=5)
-
-    def update_position(self, new_pos):
-        self.position = new_pos
-        if self.orientation == 'vline':
-            self.line.set_xdata([new_pos, new_pos])
-        else:
-            self.line.set_ydata([new_pos, new_pos])
-
-    def remove(self):
-        self.line.remove()
-
+        text_lines = []
+        for m in self.markers:
+            unit = x_unit if m.orientation == 'vline' else y_unit
+            text_lines.append(f"{m.label}: {m.position:.4f} {unit}")
+        self.info_output("\n".join(text_lines))
 
 if __name__ == "__main__":
     app = QtWidgets.QApplication(sys.argv)
     MainWindow = QtWidgets.QMainWindow()
     ui = Ui_MainWindow()
     ui.setupUi(MainWindow)
-
-    if len(sys.argv) > 1 and sys.argv[1].endswith(".csv"):
-        csv_path = sys.argv[1]
-        ui.current_file_path = csv_path
-        ui.open_excel_file(csv_path)
-
     MainWindow.setWindowTitle("TeeSense Current Pulse Display")
     MainWindow.show()
     sys.exit(app.exec_())
